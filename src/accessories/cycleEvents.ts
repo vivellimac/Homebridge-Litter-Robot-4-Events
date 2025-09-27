@@ -4,7 +4,8 @@ import Whisker from '../api/Whisker';
 import { LitterRobot } from '../litterRobot';
 
 export class CycleEventsAccessory {
-  private accessory: PlatformAccessory;
+  private completedAccessory: PlatformAccessory;
+  private interruptedAccessory: PlatformAccessory;
   private completedSwitch: Service;
   private interruptedSwitch: Service;
 
@@ -13,82 +14,69 @@ export class CycleEventsAccessory {
     private readonly account: Whisker,
     private readonly robot: LitterRobot,
   ) {
-    const name = `${robot.name} • Cycle Events`;
-    const uuid = this.platform.api.hap.uuid.generate(robot.serialNumber + '-cycle-events');
-
-    this.accessory = this.platform.getOrCreateAccessory(uuid, name);
-    this.accessory.category = this.platform.api.hap.Categories.SENSOR;
+    // Accessory 1: Cycle Completed
+    const completedName = `${robot.name} • Cycle Completed`;
+    const completedUUID = this.platform.api.hap.uuid.generate(robot.serialNumber + '-cycle-completed');
+    this.completedAccessory = this.platform.getOrCreateAccessory(completedUUID, completedName);
+    this.completedAccessory.category = this.platform.api.hap.Categories.SENSOR;
 
     this.completedSwitch =
-      this.accessory.getService('Cycle Completed') ??
-      this.accessory.addService(
+      this.completedAccessory.getService('Cycle Completed') ??
+      this.completedAccessory.addService(
         this.platform.Service.StatelessProgrammableSwitch,
         'Cycle Completed',
         'cycle-completed',
       );
 
+    this.completedSwitch.setCharacteristic(
+      this.platform.Characteristic.ConfiguredName,
+      'Cycle Completed',
+    );
+    this.completedSwitch.setCharacteristic(
+      this.platform.Characteristic.ProgrammableSwitchEvent,
+      this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
+    );
+
+    this.completedAccessory
+      .getService(this.platform.Service.AccessoryInformation)
+      ?.setCharacteristic(this.platform.Characteristic.Manufacturer, 'Whisker')
+      .setCharacteristic(this.platform.Characteristic.Model, 'Litter-Robot 4')
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.robot.serialNumber);
+
+    // Accessory 2: Cycle Interrupted
+    const interruptedName = `${robot.name} • Cycle Interrupted`;
+    const interruptedUUID = this.platform.api.hap.uuid.generate(robot.serialNumber + '-cycle-interrupted');
+    this.interruptedAccessory = this.platform.getOrCreateAccessory(interruptedUUID, interruptedName);
+    this.interruptedAccessory.category = this.platform.api.hap.Categories.SENSOR;
+
     this.interruptedSwitch =
-      this.accessory.getService('Cycle Interrupted') ??
-      this.accessory.addService(
+      this.interruptedAccessory.getService('Cycle Interrupted') ??
+      this.interruptedAccessory.addService(
         this.platform.Service.StatelessProgrammableSwitch,
         'Cycle Interrupted',
         'cycle-interrupted',
       );
 
-<<<<<<< HEAD
-=======
-    // Label + indices so Home shows two distinct buttons in order
-    const label =
-      this.accessory.getService(this.platform.Service.ServiceLabel) ??
-      this.accessory.addService(this.platform.Service.ServiceLabel);
-    label.setCharacteristic(
-      this.platform.Characteristic.ServiceLabelNamespace,
-      this.platform.Characteristic.ServiceLabelNamespace.ARABIC_NUMERALS,
-    );
-
-    this.completedSwitch.setCharacteristic(
-      this.platform.Characteristic.ServiceLabelIndex,
-      1,
-    );
-    this.interruptedSwitch.setCharacteristic(
-      this.platform.Characteristic.ServiceLabelIndex,
-      2,
-    );
-
-    // Give buttons human-friendly names (shown in Automations on newer iOS)
-    this.completedSwitch.setCharacteristic(
-      this.platform.Characteristic.ConfiguredName,
-      'Cycle Completed',
-    );
     this.interruptedSwitch.setCharacteristic(
       this.platform.Characteristic.ConfiguredName,
       'Cycle Interrupted',
     );
+    this.interruptedSwitch.setCharacteristic(
+      this.platform.Characteristic.ProgrammableSwitchEvent,
+      this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
+    );
 
-    // Advertise SINGLE_PRESS as the supported event
->>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
-    const E = this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS;
-    this.completedSwitch.setCharacteristic(this.platform.Characteristic.ProgrammableSwitchEvent, E);
-    this.interruptedSwitch.setCharacteristic(this.platform.Characteristic.ProgrammableSwitchEvent, E);
-
-<<<<<<< HEAD
-    this.accessory.getService(this.platform.Service.AccessoryInformation)
-=======
-    this.accessory
+    this.interruptedAccessory
       .getService(this.platform.Service.AccessoryInformation)
->>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
       ?.setCharacteristic(this.platform.Characteristic.Manufacturer, 'Whisker')
       .setCharacteristic(this.platform.Characteristic.Model, 'Litter-Robot 4')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.robot.serialNumber);
   }
 
+  // Fire HomeKit events
   pressCompleted() {
-<<<<<<< HEAD
-    if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK event → Cycle Completed');
-=======
     if (this.platform?.config?.debug)
       this.platform.log.info('[DEBUG] HK event → Cycle Completed');
->>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
     this.completedSwitch.updateCharacteristic(
       this.platform.Characteristic.ProgrammableSwitchEvent,
       this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
@@ -96,22 +84,19 @@ export class CycleEventsAccessory {
   }
 
   pressInterrupted() {
-<<<<<<< HEAD
-    if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK event → Cycle Interrupted');
-=======
     if (this.platform?.config?.debug)
       this.platform.log.info('[DEBUG] HK event → Cycle Interrupted');
->>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
     this.interruptedSwitch.updateCharacteristic(
       this.platform.Characteristic.ProgrammableSwitchEvent,
       this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
     );
   }
 
+  // Persist last status across restarts (store on the Completed accessory context)
   get lastStatusCode(): string | undefined {
-    return this.accessory.context.lastStatusCode as string | undefined;
+    return this.completedAccessory.context.lastStatusCode as string | undefined;
   }
   set lastStatusCode(code: string | undefined) {
-    this.accessory.context.lastStatusCode = code;
+    this.completedAccessory.context.lastStatusCode = code;
   }
 }
