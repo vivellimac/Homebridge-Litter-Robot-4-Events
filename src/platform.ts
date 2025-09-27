@@ -32,15 +32,14 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     });
   }
 
-  private get debugEnabled(): boolean {
-    const cfg = this.config as any;
-    return Boolean(cfg?.debug || cfg?.debugMode);
-  }
+private get debugEnabled(): boolean {
+  return Boolean((this.config as any)?.debug);
+}
 
-  /** unified debug */
-  public d(message: string, ...params: any[]) {
-    if (this.debugEnabled) this.log.debug(message, ...params);
-  }
+/** unified debug */
+public d(message: string, ...params: any[]) {
+  if (this.debugEnabled) this.log.debug(message, ...params);
+}
 
   getOrCreateAccessory(uuid: string, name: string) {
     const existingAccessory = this.accessories.find(a => a.UUID === uuid);
