@@ -12,10 +12,10 @@ These make it easy to drive Automations/Scenes in the Home app.
 ---
 
 ## Features
-- Supports multiple Litter-Robot 4 devices 🤖🤖🤖
-- Toggle the **Globe Light** 💡
-- **Cat Detect** sensor 📸
-- **Waste Drawer Level** sensor 💰
+- Supports multiple Litter-Robot 4 devices
+- Toggle the **Globe Light**
+- **Cat Detect** sensor
+- **Waste Drawer Level** sensor
 - **Cycle event switches** (Completed / Interrupted / Interrupted Timeout)
 - Fast fixed polling (**5s**) for snappy automations
 - Robust normalization of backend status into **canonical HA-style codes**
