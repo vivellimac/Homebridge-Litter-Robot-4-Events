@@ -1,9 +1,13 @@
 import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
-
 import Whisker from './api/Whisker';
 import { LitterRobot } from './litterRobot';
 import { PLUGIN_NAME, PLATFORM_NAME } from './settings';
 import { Robot } from './api/Whisker.types';
+
+type PluginConfig = PlatformConfig & {
+  disableDrawerSensor?: boolean;
+  debug?: boolean;
+};
 
 export class LitterRobotPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
@@ -14,17 +18,23 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
   private static readonly POLL_INTERVAL_MS = 5000;
 
+  private get cfg(): PluginConfig {
+    return this.config as PluginConfig;
+  }
+
   constructor(
     public readonly log: Logger,
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
-    this.log.warn('[LR4-Events] BUILD TAG: fixed-5s');
+    this.log.debug('Finished initializing platform:', this.config.name);
 
     const account = new Whisker(this.config, this.log, this.accessories, this.api);
 
     this.api.on('didFinishLaunching', () => {
+      this.log.debug('Executed didFinishLaunching callback');
       account.authenticate().then(() => {
+        this.log.debug('Authenticated, discovering devices…');
         this.discoverDevices(account).then(() => {
           this.pollForUpdates(account, LitterRobotPlatform.POLL_INTERVAL_MS);
         });
@@ -32,38 +42,44 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     });
   }
 
-private get debugEnabled(): boolean {
-  return Boolean((this.config as any)?.debug);
-}
+  private get debugEnabled(): boolean {
+    return Boolean(this.cfg.debug);
+  }
 
-/** unified debug */
-public d(message: string, ...params: any[]) {
-  if (this.debugEnabled) this.log.debug(message, ...params);
-}
-
-  getOrCreateAccessory(uuid: string, name: string) {
-    const existingAccessory = this.accessories.find(a => a.UUID === uuid);
-    if (existingAccessory) {
-      const skipDrawerLevel = (this.config as any).disableDrawerSensor;
-      const isDrawerLevel = existingAccessory.services[1]?.constructor?.name === 'HumiditySensor';
-      if (skipDrawerLevel && isDrawerLevel) {
-        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
-        return existingAccessory;
-      }
-      return existingAccessory;
-    } else {
-      const accessory = new this.api.platformAccessory(name, uuid);
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      this.accessories.push(accessory);
-      return accessory;
+  /** unified debug */
+  public d(message: string, ...params: unknown[]): void {
+    if (this.debugEnabled) {
+      this.log.info(`[DEBUG] ${message}`, ...params);
     }
   }
 
-  configureAccessory(accessory: PlatformAccessory) {
+  public getOrCreateAccessory(uuid: string, name: string): PlatformAccessory {
+    const existingAccessory = this.accessories.find((a) => a.UUID === uuid);
+    if (existingAccessory) {
+      const skipDrawerLevel = this.cfg.disableDrawerSensor;
+      const isDrawerLevel = existingAccessory.services[1]?.constructor?.name === 'HumiditySensor';
+      if (skipDrawerLevel && isDrawerLevel) {
+        this.log.info('Skipping DrawerLevel:', name);
+        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
+        return existingAccessory;
+      }
+      this.log.info('Restoring existing accessory:', name);
+      return existingAccessory;
+    }
+
+    this.log.info('Adding new accessory:', name);
+    const accessory = new this.api.platformAccessory(name, uuid);
+    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    this.accessories.push(accessory);
+    return accessory;
+  }
+
+  configureAccessory(accessory: PlatformAccessory): void {
+    this.log.info('Loading accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
   }
 
-  async discoverDevices(account: Whisker) {
+  async discoverDevices(account: Whisker): Promise<void> {
     const data = JSON.stringify({
       query: `{
         query: getLitterRobot4ByUser(userId: "${account.accountId}") {
@@ -76,14 +92,17 @@ public d(message: string, ...params: any[]) {
 
     return account.sendCommand(data).then((response) => {
       const devices: Robot[] = response?.data?.data?.query ?? [];
-      this.d('discovered devices -> %s', JSON.stringify(devices.map(d => d.serial)));
+      if (this.debugEnabled) {
+        this.log.info('[DEBUG] discovered devices -> %s', JSON.stringify(devices.map((d) => d.serial)));
+      }
       for (const device of devices) {
+        this.log.debug('Discovered device:', device.name, device.serial);
         this.litterRobots.push(new LitterRobot(account, device, this, this.log, this.config));
       }
     });
   }
 
-  pollForUpdates(account: Whisker, interval: number) {
+  pollForUpdates(account: Whisker, interval: number): void {
     const command = JSON.stringify({
       query: `{
         query: getLitterRobot4ByUser(userId: "${account.accountId}") {
@@ -100,19 +119,22 @@ public d(message: string, ...params: any[]) {
     account.sendCommand(command)
       .then((response) => {
         const data: Robot[] = response?.data?.data?.query ?? [];
-        this.d('poll -> %d device(s)', data.length);
+        if (this.debugEnabled) {
+          this.log.info('[DEBUG] poll -> %d device(s)', data.length);
+        }
 
         data.forEach((device: Robot) => {
           const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
-          if (lr) lr.update(device);
+          if (lr) {
+            lr.update(device);
+          }
         });
 
         this.d('next poll in %d ms', interval);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       })
-      .catch((err) => {
-        this.log.warn('Poll failed: %s', err?.message || err);
-        this.d('next poll in %d ms (after error)', interval);
+      .catch((err: unknown) => {
+        this.log.warn('Poll failed: %s', (err as Error)?.message ?? String(err));
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       });
   }
