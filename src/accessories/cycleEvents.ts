@@ -35,18 +35,60 @@ export class CycleEventsAccessory {
         'cycle-interrupted',
       );
 
+<<<<<<< HEAD
+=======
+    // Label + indices so Home shows two distinct buttons in order
+    const label =
+      this.accessory.getService(this.platform.Service.ServiceLabel) ??
+      this.accessory.addService(this.platform.Service.ServiceLabel);
+    label.setCharacteristic(
+      this.platform.Characteristic.ServiceLabelNamespace,
+      this.platform.Characteristic.ServiceLabelNamespace.ARABIC_NUMERALS,
+    );
+
+    this.completedSwitch.setCharacteristic(
+      this.platform.Characteristic.ServiceLabelIndex,
+      1,
+    );
+    this.interruptedSwitch.setCharacteristic(
+      this.platform.Characteristic.ServiceLabelIndex,
+      2,
+    );
+
+    // Give buttons human-friendly names (shown in Automations on newer iOS)
+    this.completedSwitch.setCharacteristic(
+      this.platform.Characteristic.ConfiguredName,
+      'Cycle Completed',
+    );
+    this.interruptedSwitch.setCharacteristic(
+      this.platform.Characteristic.ConfiguredName,
+      'Cycle Interrupted',
+    );
+
+    // Advertise SINGLE_PRESS as the supported event
+>>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
     const E = this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS;
     this.completedSwitch.setCharacteristic(this.platform.Characteristic.ProgrammableSwitchEvent, E);
     this.interruptedSwitch.setCharacteristic(this.platform.Characteristic.ProgrammableSwitchEvent, E);
 
+<<<<<<< HEAD
     this.accessory.getService(this.platform.Service.AccessoryInformation)
+=======
+    this.accessory
+      .getService(this.platform.Service.AccessoryInformation)
+>>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
       ?.setCharacteristic(this.platform.Characteristic.Manufacturer, 'Whisker')
       .setCharacteristic(this.platform.Characteristic.Model, 'Litter-Robot 4')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.robot.serialNumber);
   }
 
   pressCompleted() {
+<<<<<<< HEAD
     if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK event → Cycle Completed');
+=======
+    if (this.platform?.config?.debug)
+      this.platform.log.info('[DEBUG] HK event → Cycle Completed');
+>>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
     this.completedSwitch.updateCharacteristic(
       this.platform.Characteristic.ProgrammableSwitchEvent,
       this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
@@ -54,7 +96,12 @@ export class CycleEventsAccessory {
   }
 
   pressInterrupted() {
+<<<<<<< HEAD
     if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK event → Cycle Interrupted');
+=======
+    if (this.platform?.config?.debug)
+      this.platform.log.info('[DEBUG] HK event → Cycle Interrupted');
+>>>>>>> 4d3c10d (feat: cycle event labels, individual switches)
     this.interruptedSwitch.updateCharacteristic(
       this.platform.Characteristic.ProgrammableSwitchEvent,
       this.platform.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS,
