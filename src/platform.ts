@@ -1,4 +1,12 @@
-import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
+import {
+  API,
+  DynamicPlatformPlugin,
+  Logger,
+  PlatformAccessory,
+  PlatformConfig,
+  Service,
+  Characteristic,
+} from 'homebridge';
 import Whisker from './api/Whisker';
 import { LitterRobot } from './litterRobot';
 import { PLUGIN_NAME, PLATFORM_NAME } from './settings';
@@ -134,7 +142,8 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       })
       .catch((err: unknown) => {
-        this.log.warn('Poll failed: %s', (err as Error)?.message ?? String(err));
+        const msg = (err as Error)?.message ?? String(err);
+        this.log.warn('Poll failed: %s', msg);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       });
   }
