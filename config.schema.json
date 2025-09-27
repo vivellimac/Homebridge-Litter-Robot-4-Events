@@ -25,8 +25,6 @@
         "default": false,
         "required": false
       },
-
-      /* ---------- Debug ---------- */
       "debug": {
         "title": "Enable Debug Logging",
         "type": "boolean",
@@ -41,8 +39,6 @@
         "default": false,
         "description": "Alias of 'Enable Debug Logging' for backward compatibility."
       },
-
-      /* ---------- Cycle Event Switches ---------- */
       "completedPulseSeconds": {
         "title": "Cycle Completed: pulse seconds",
         "type": "integer",
