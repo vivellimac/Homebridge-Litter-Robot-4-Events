@@ -98,6 +98,7 @@ public update(device: Robot): void {
 
   private handleRobotUpdate(device: Robot) {
     const raw = (device.robotStatus ?? '').toString();
+    this.platform.d('device payload: %s', JSON.stringify(device));
     const code = this.normalizeStatusCode(raw);
 
     this.platform.d('robotStatus raw %s %s', this.name, raw);
