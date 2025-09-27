@@ -43,7 +43,19 @@ const CODE_LABELS: Record<string, string> = {
 };
 
 const INTERRUPT_LIKE = new Set<string>([
-  'csi', 'csf', 'cst', 'pd', 'p', 'hpf', 'dpf', 'dhf', 'otf', 'offline', 'sdf', 'spf', 'scf',
+  'csi',
+  'csf',
+  'cst',
+  'pd',
+  'p',
+  'hpf',
+  'dpf',
+  'dhf',
+  'otf',
+  'offline',
+  'sdf',
+  'spf',
+  'scf',
 ]);
 
 const STATUS_COMPLETE = new Set<string>(['ccc']);
@@ -93,12 +105,12 @@ export class LitterRobot {
   public update(device: Robot): void {
     const nightLightOn = device.isNightLightLEDOn === true;
     const statusText = device.robotStatus ?? '';
-    const dfiPercent = Number(device.DFILevelPercent ?? 0);
+    const dfiPercentNum = Number(device.DFILevelPercent ?? 0);
 
     this.globeLight.update(nightLightOn);
     this.occupancySensor.update(statusText);
     if (!this.cfg.disableDrawerSensor && this.drawerLevel) {
-      this.drawerLevel.update(Number.isFinite(dfiPercent) ? dfiPercent : 0);
+      this.drawerLevel.update(Number.isFinite(dfiPercentNum) ? dfiPercentNum : 0);
     }
 
     this.handleRobotUpdate(device);
@@ -155,9 +167,15 @@ export class LitterRobot {
     }
 
     const exact = v.toLowerCase();
-    if (exact === 'robot_clean') return 'ccp'; // Clean in progress
-    if (exact === 'robot_idle') return 'rdy'; // Ready/idle
-    if (CODE_LABELS[exact]) return exact;
+    if (exact === 'robot_clean') {
+      return 'ccp'; // Clean in progress
+    }
+    if (exact === 'robot_idle') {
+      return 'rdy'; // Ready/idle
+    }
+    if (CODE_LABELS[exact]) {
+      return exact;
+    }
 
     if (this.name && v.toLowerCase().startsWith(this.name.toLowerCase())) {
       v = v.slice(this.name.length).trim();
@@ -182,27 +200,34 @@ export class LitterRobot {
       [/(^|\s)offline(\s|$)/, 'offline'],
     ];
 
-    for (const [pat, code] of KEYWORD_MAP) {
+    for (const [pat, mapped] of KEYWORD_MAP) {
       if (pat.test(t)) {
-        return code;
+        return mapped;
       }
     }
 
-    if (t.includes('fault')) return 'csf';
-    if (t.includes('pause')) return 'p';
-    if (t.includes('off')) return 'off';
+    if (t.includes('fault')) {
+      return 'csf';
+    }
+    if (t.includes('pause')) {
+      return 'p';
+    }
+    if (t.includes('off')) {
+      return 'off';
+    }
 
     return '';
   }
 
   private fireInterrupted(): void {
     this.cycleEvents.setInterrupted();
+
     const mins = Math.max(0, Number(this.cfg.interruptedTimeoutMinutes ?? 5));
     if (this.interruptedTimer) {
       clearTimeout(this.interruptedTimer);
     }
     if (mins > 0) {
-      this.interruptedTimer = setTimeout(() => {
+      this.interruptedTimer = setTimeout((): void => {
         this.platform.d('interrupted timer expired → firing timeout');
         this.cycleEvents.pressInterruptedTimeout();
       }, mins * 60_000);
