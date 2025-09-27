@@ -1,31 +1,45 @@
 # Litter Robot 4 Homebridge Plugin (Cycle Events Fork)
 
-This fork extends the original plugin with **HomeKit event triggers** for Litter-Robot 4:
-- **Cycle Completed** → fires a HomeKit trigger when a clean cycle finishes.
-- **Cycle Interrupted** → fires a HomeKit trigger when a cycle is interrupted (e.g., cat sensor).
+This fork extends the original LR4 plugin with **HomeKit-friendly cycle event switches**:
 
-These appear in the Home app as **Stateless Programmable Switch** “buttons,” perfect for automations/scenes.
+- **Cycle Completed** – pulses ON when a clean finishes
+- **Cycle Interrupted** – latches ON when a cycle is interrupted/faulted (clears on completion)
+- **Cycle Interrupted Timeout** – pulses ON if a clean stays “in progress” beyond your timeout window
+
+These appear as **regular Switches** in Home, so you can trigger automations on the switch turning ON.
+
+> Based on the excellent work in [`rylee-s/Homebridge-Litter-Robot-4`](https://github.com/rylee-s/Homebridge-Litter-Robot-4). This fork focuses on LR4 **cycle events** and a few quality-of-life tuning options.
 
 ---
 
 ## Features
-- Supports multiple Litter-Robot 4 devices 🤖🤖🤖
-- Toggle the **Globe Light** 💡
-- **Cat Detect** sensor 📸
-- **Waste Drawer Level** sensor 💰
-- **NEW: Cycle Completed / Cycle Interrupted** HomeKit triggers (event-style)
 
-### How it works (TL;DR)
-The plugin polls Whisker’s LR4 API and watches `robotStatus`. When it transitions to:
-- `ccc` (or a label containing “complete”) → **Cycle Completed** event
-- `csi` / `csf` (or labels containing “interrupted” / “cat sensor fault”) → **Cycle Interrupted** event
+- Supports multiple **Litter-Robot 4** devices
+- Toggle the **Globe Light**
+- **Cat Detect** status
+- **Waste Drawer Level** (optional, can be disabled)
+- **NEW: Three cycle-event switches** per robot:
+  - `• Cycle Completed` (momentary pulse)
+  - `• Cycle Interrupted` (latched ON until completion)
+  - `• Cycle Interrupted Timeout` (momentary pulse if a clean hangs too long)
+- **Fast polling** (default every **5 seconds**) for responsive automations
+- **Canonical status-code mapping** (HA-style: `ccc`, `ccp`, `rdy`, `csi`, etc.)
 
-> You’ll use these in **Home → Automations → A Sensor Detects Something → Choose Accessory**.
+### How cycle events are detected
+
+We normalize LR4 status text to canonical codes:
+
+- **Completed**: `ccc`, or a transition **`ccp` → `rdy`**
+- **Interrupted**: any of `csi`, `csf`, `pd`, `p`, `hpf`, `dpf`, `dhf`, `otf`, `offline`, etc.
+- **Timeout**: if `ccp` (clean in progress) exceeds your **max CLEAN minutes**, we fire the *Interrupted Timeout* switch
+
+You can customize pulse durations and timeouts in the config (see below).
 
 ---
 
 ## Supported Robot Versions
-- Litter-Robot 4
+
+- **Litter-Robot 4**
 
 ---
 
