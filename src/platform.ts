@@ -19,14 +19,12 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
-    this.log.debug('Finished initializing platform:', this.config.name);
+    this.log.warn('[LR4-Events] BUILD TAG: fixed-5s'); // runtime confirmation
 
     const account = new Whisker(this.config, this.log, this.accessories, this.api);
 
     this.api.on('didFinishLaunching', () => {
-      this.log.debug('Executed didFinishLaunching callback');
       account.authenticate().then(() => {
-        this.log.debug('Authenticated, discovering devices…');
         this.discoverDevices(account).then(() => {
           this.pollForUpdates(account, LitterRobotPlatform.POLL_INTERVAL_MS);
         });
@@ -45,14 +43,11 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       const skipDrawerLevel = (this.config as any).disableDrawerSensor;
       const isDrawerLevel = existingAccessory.services[1]?.constructor?.name === 'HumiditySensor';
       if (skipDrawerLevel && isDrawerLevel) {
-        this.log.info('Skipping DrawerLevel:', name);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
         return existingAccessory;
       }
-      this.log.info('Restoring existing accessory:', name);
       return existingAccessory;
     } else {
-      this.log.info('Adding new accessory:', name);
       const accessory = new this.api.platformAccessory(name, uuid);
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.push(accessory);
@@ -61,7 +56,6 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   }
 
   configureAccessory(accessory: PlatformAccessory) {
-    this.log.info('Loading accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
   }
 
@@ -80,7 +74,6 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       const devices: Robot[] = response?.data?.data?.query ?? [];
       if (this.debugEnabled) this.log.info('[DEBUG] discovered devices -> %s', JSON.stringify(devices.map(d => d.serial)));
       for (const device of devices) {
-        this.log.debug('Discovered device:', device.name, device.serial);
         this.litterRobots.push(new LitterRobot(account, device, this, this.log, this.config));
       }
     });
@@ -110,10 +103,12 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
           if (lr) lr.update(device);
         });
 
+        if (this.debugEnabled) this.log.info('[DEBUG] next poll in %d ms', interval);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       })
       .catch((err) => {
         this.log.warn('Poll failed: %s', err?.message || err);
+        if (this.debugEnabled) this.log.info('[DEBUG] next poll in %d ms (after error)', interval);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       });
   }
