@@ -19,7 +19,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
-    this.log.warn('[LR4-Events] BUILD TAG: fixed-5s'); // runtime confirmation
+    this.log.warn('[LR4-Events] BUILD TAG: fixed-5s');
 
     const account = new Whisker(this.config, this.log, this.accessories, this.api);
 
@@ -35,6 +35,11 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   private get debugEnabled(): boolean {
     const cfg = this.config as any;
     return Boolean(cfg?.debug || cfg?.debugMode);
+  }
+
+  /** unified debug */
+  public d(message: string, ...params: any[]) {
+    if (this.debugEnabled) this.log.debug(message, ...params);
   }
 
   getOrCreateAccessory(uuid: string, name: string) {
@@ -72,7 +77,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
     return account.sendCommand(data).then((response) => {
       const devices: Robot[] = response?.data?.data?.query ?? [];
-      if (this.debugEnabled) this.log.info('[DEBUG] discovered devices -> %s', JSON.stringify(devices.map(d => d.serial)));
+      this.d('discovered devices -> %s', JSON.stringify(devices.map(d => d.serial)));
       for (const device of devices) {
         this.litterRobots.push(new LitterRobot(account, device, this, this.log, this.config));
       }
@@ -96,19 +101,19 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     account.sendCommand(command)
       .then((response) => {
         const data: Robot[] = response?.data?.data?.query ?? [];
-        if (this.debugEnabled) this.log.info('[DEBUG] poll -> %d device(s)', data.length);
+        this.d('poll -> %d device(s)', data.length);
 
         data.forEach((device: Robot) => {
           const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
           if (lr) lr.update(device);
         });
 
-        if (this.debugEnabled) this.log.info('[DEBUG] next poll in %d ms', interval);
+        this.d('next poll in %d ms', interval);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       })
       .catch((err) => {
         this.log.warn('Poll failed: %s', err?.message || err);
-        if (this.debugEnabled) this.log.info('[DEBUG] next poll in %d ms (after error)', interval);
+        this.d('next poll in %d ms (after error)', interval);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       });
   }
