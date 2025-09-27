@@ -35,15 +35,14 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   }
 
   private get debugEnabled(): boolean {
-    // support both "debug" and legacy "debugMode"
-    // @ts-expect-error allow unknown keys on config
-    return Boolean(this.config.debug || this.config.debugMode);
+    const cfg = this.config as any;
+    return Boolean(cfg?.debug || cfg?.debugMode);
   }
 
   getOrCreateAccessory(uuid: string, name: string) {
     const existingAccessory = this.accessories.find(a => a.UUID === uuid);
     if (existingAccessory) {
-      const skipDrawerLevel = this.config.disableDrawerSensor;
+      const skipDrawerLevel = (this.config as any).disableDrawerSensor;
       const isDrawerLevel = existingAccessory.services[1]?.constructor?.name === 'HumiditySensor';
       if (skipDrawerLevel && isDrawerLevel) {
         this.log.info('Skipping DrawerLevel:', name);
@@ -79,7 +78,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
     return account.sendCommand(data).then((response) => {
       const devices: Robot[] = response?.data?.data?.query ?? [];
-      if (this.debugEnabled) this.log.info('[DEBUG] discovered devices ->', JSON.stringify(devices.map(d => d.serial)));
+      if (this.debugEnabled) this.log.info('[DEBUG] discovered devices -> %s', JSON.stringify(devices.map(d => d.serial)));
       for (const device of devices) {
         this.log.debug('Discovered device:', device.name, device.serial);
         this.litterRobots.push(new LitterRobot(account, device, this, this.log, this.config));
@@ -108,9 +107,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
         data.forEach((device: Robot) => {
           const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
-          if (lr) {
-            lr.update(device);
-          }
+          if (lr) lr.update(device);
         });
 
         setTimeout(() => this.pollForUpdates(account, interval), interval);
