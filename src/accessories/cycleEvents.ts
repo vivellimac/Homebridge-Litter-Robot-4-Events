@@ -109,7 +109,7 @@ export class CycleEventsAccessory {
     this.pulse(this.timeoutSwitch, this.timeoutPulseMs());
   }
 
-  // Persist last code across restarts on the Completed accessory
+  // Persist last code across restarts on the Completed accessoryf
   get lastStatusCode(): string | undefined {
     return this.completedAcc.context.lastStatusCode as string | undefined;
   }
