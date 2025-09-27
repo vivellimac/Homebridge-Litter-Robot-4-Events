@@ -15,7 +15,8 @@
         "title": "Litter Robot App Password",
         "type": "string",
         "required": true,
-        "default": "my_password"
+        "default": "my_password",
+        "format": "password"
       },
       "disableDrawerSensor": {
         "type": "boolean",
@@ -24,11 +25,56 @@
         "default": false,
         "required": false
       },
-      "debugMode": {  
-        "title": "Debug Mode",
+
+      /* ---------- Debug ---------- */
+      "debug": {
+        "title": "Enable Debug Logging",
         "type": "boolean",
         "required": false,
-        "default": false
+        "default": false,
+        "description": "If enabled, the plugin will log verbose debug information."
+      },
+      "debugMode": {
+        "title": "Debug Mode (alias)",
+        "type": "boolean",
+        "required": false,
+        "default": false,
+        "description": "Alias of 'Enable Debug Logging' for backward compatibility."
+      },
+
+      /* ---------- Cycle Event Switches ---------- */
+      "completedPulseSeconds": {
+        "title": "Cycle Completed: pulse seconds",
+        "type": "integer",
+        "minimum": 0,
+        "default": 1,
+        "description": "How long the 'Cycle Completed' switch stays ON before auto-reset. 0 disables pulsing."
+      },
+      "interruptedOnMode": {
+        "title": "Cycle Interrupted: ON behavior",
+        "type": "string",
+        "enum": ["latch", "pulse"],
+        "default": "latch",
+        "description": "latch = switch stays ON until a Completed event; pulse = brief ON then auto-reset."
+      },
+      "interruptedPulseSeconds": {
+        "title": "Cycle Interrupted: pulse seconds (if mode=pulse)",
+        "type": "integer",
+        "minimum": 0,
+        "default": 1
+      },
+      "interruptedTimeoutMinutes": {
+        "title": "Interrupted timeout minutes",
+        "type": "integer",
+        "minimum": 0,
+        "default": 5,
+        "description": "If an Interrupted occurs and no Completed happens within this many minutes, trigger the 'Interrupted Timeout' switch. 0 = disabled."
+      },
+      "interruptedTimeoutPulseSeconds": {
+        "title": "Interrupted timeout: pulse seconds",
+        "type": "integer",
+        "minimum": 0,
+        "default": 1
       }
     }
   }
