@@ -1,15 +1,16 @@
 {
-  "displayName": "Litter Robot 4",
-  "name": "homebridge-litter-robot-4",
-  "version": "3.1.0",
-  "description": "Litter Robot 4 Plugin for Apple HomeKit via Homebridge",
+  "displayName": "Litter Robot 4 Cycle Events",
+  "name": "homebridge-litter-robot-4-events",
+  "version": "1.0.0",
+  "author": "@vivellimac",
+  "description": "Litter Robot 4 Plugin With Cycle Events for Apple HomeKit via Homebridge",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rylee-s/Homebridge-Litter-Robot-4.git"
+    "url": "https://github.com/vivellimac/Homebridge-Litter-Robot-4-Events.git"
   },
   "bugs": {
-    "url": "https://github.com/rylee-s/Homebridge-Litter-Robot-4/issues"
+    "url": "https://github.com/vivellimac/Homebridge-Litter-Robot-4-Events/issues"
   },
   "engines": {
     "node": "^18.17.0",
