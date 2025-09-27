@@ -27,7 +27,7 @@ npm install @rylee-s/Homebridge-Litter-Robot-4
 
 Configuration should be very simple!
 
-### Homebridge Web UI 
+### Homebridge Web UI
 Just enter the Username and Password you use for your Whisker App
 
 ### Homebridge Command Line Users
@@ -49,5 +49,5 @@ Just enter the Username and Password you use for your Whisker App
 ## Contributing
 PRs and issues are welcome.
 
-# 
+#
 Thanks for taking a look at my project! If it helps you, please give it a star ⭐️
