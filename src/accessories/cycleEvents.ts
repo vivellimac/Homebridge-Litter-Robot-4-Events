@@ -4,143 +4,137 @@ import Whisker from '../api/Whisker';
 import { LitterRobot } from '../litterRobot';
 
 export class CycleEventsAccessory {
-  private completedAccessory: PlatformAccessory;
-  private interruptedAccessory: PlatformAccessory;
-  private timeoutAccessory?: PlatformAccessory;
+  private completedAcc: PlatformAccessory;
+  private interruptedAcc: PlatformAccessory;
+  private timeoutAcc: PlatformAccessory;
 
   private completedSwitch: Service;
   private interruptedSwitch: Service;
-  private timeoutSwitch?: Service;
-
-  private get cfg() { return this.platform.config ?? {}; }
-  private get completedPulseMs() { return Math.max(0, Number(this.cfg.completedPulseSeconds ?? 1)) * 1000; }
-  private get interruptedMode(): 'latch'|'pulse' { return (this.cfg.interruptedOnMode ?? 'latch') as any; }
-  private get interruptedPulseMs() { return Math.max(0, Number(this.cfg.interruptedPulseSeconds ?? 1)) * 1000; }
-  private get timeoutMinutes() { return Math.max(0, Number(this.cfg.interruptedTimeoutMinutes ?? 5)); }
-  private get timeoutPulseMs() { return Math.max(0, Number(this.cfg.interruptedTimeoutPulseSeconds ?? 1)) * 1000; }
+  private timeoutSwitch: Service;
 
   constructor(
     private readonly platform: LitterRobotPlatform,
     private readonly account: Whisker,
     private readonly robot: LitterRobot,
   ) {
-    // 1) Cycle Completed (momentary Switch)
+    // Completed
     {
       const name = `${robot.name} • Cycle Completed`;
       const uuid = this.platform.api.hap.uuid.generate(robot.serialNumber + '-cycle-completed-switch');
-      this.completedAccessory = this.platform.getOrCreateAccessory(uuid, name);
-      this.completedAccessory.category = this.platform.api.hap.Categories.SWITCH;
+      this.completedAcc = this.platform.getOrCreateAccessory(uuid, name);
+      this.completedAcc.category = this.platform.api.hap.Categories.SWITCH;
 
       this.completedSwitch =
-        this.completedAccessory.getService(this.platform.Service.Switch)
-        ?? this.completedAccessory.addService(this.platform.Service.Switch, 'Cycle Completed', 'cycle-completed');
+        this.completedAcc.getService(this.platform.Service.Switch) ??
+        this.completedAcc.addService(this.platform.Service.Switch, 'Cycle Completed', 'cycle-completed-switch');
 
-      this.completedSwitch
-        .setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Cycle Completed')
-        .getCharacteristic(this.platform.Characteristic.On)
-        .onSet(async (value) => {
-          if (value) this.pulse(this.completedSwitch, this.completedPulseMs);
-        })
-        .updateValue(false);
+      this.completedSwitch.getCharacteristic(this.platform.Characteristic.On)
+        .onGet(() => false) // stateless-like
+        .onSet(async (v) => {
+          // allow manual pulse from Home app
+          if (v) this.pulse(this.completedSwitch, this.completedPulseMs());
+        });
 
-      this.completedAccessory.getService(this.platform.Service.AccessoryInformation)
+      this.completedAcc.getService(this.platform.Service.AccessoryInformation)
         ?.setCharacteristic(this.platform.Characteristic.Manufacturer, 'Whisker')
         .setCharacteristic(this.platform.Characteristic.Model, 'Litter-Robot 4')
         .setCharacteristic(this.platform.Characteristic.SerialNumber, this.robot.serialNumber);
     }
 
-    // 2) Cycle Interrupted (latch or pulse Switch)
+    // Interrupted (latching ON until cleared)
     {
       const name = `${robot.name} • Cycle Interrupted`;
       const uuid = this.platform.api.hap.uuid.generate(robot.serialNumber + '-cycle-interrupted-switch');
-      this.interruptedAccessory = this.platform.getOrCreateAccessory(uuid, name);
-      this.interruptedAccessory.category = this.platform.api.hap.Categories.SWITCH;
+      this.interruptedAcc = this.platform.getOrCreateAccessory(uuid, name);
+      this.interruptedAcc.category = this.platform.api.hap.Categories.SWITCH;
 
       this.interruptedSwitch =
-        this.interruptedAccessory.getService(this.platform.Service.Switch)
-        ?? this.interruptedAccessory.addService(this.platform.Service.Switch, 'Cycle Interrupted', 'cycle-interrupted');
+        this.interruptedAcc.getService(this.platform.Service.Switch) ??
+        this.interruptedAcc.addService(this.platform.Service.Switch, 'Cycle Interrupted', 'cycle-interrupted-switch');
 
-      this.interruptedSwitch
-        .setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Cycle Interrupted')
-        .getCharacteristic(this.platform.Characteristic.On)
-        .onSet(async (value) => {
-          if (!value) return; // OFF is handled by code on completion
-          if (this.interruptedMode === 'pulse') {
-            this.pulse(this.interruptedSwitch, this.interruptedPulseMs);
-          } else {
-            this.interruptedSwitch.updateCharacteristic(this.platform.Characteristic.On, true);
-          }
-        })
-        .updateValue(false);
+      this.interruptedSwitch.getCharacteristic(this.platform.Characteristic.On)
+        .onGet(() => Boolean(this.interruptedAcc.context._on))
+        .onSet(async (v) => {
+          this.interruptedAcc.context._on = Boolean(v);
+          this.interruptedSwitch.updateCharacteristic(this.platform.Characteristic.On, v);
+        });
 
-      this.interruptedAccessory.getService(this.platform.Service.AccessoryInformation)
+      this.interruptedAcc.getService(this.platform.Service.AccessoryInformation)
         ?.setCharacteristic(this.platform.Characteristic.Manufacturer, 'Whisker')
         .setCharacteristic(this.platform.Characteristic.Model, 'Litter-Robot 4')
         .setCharacteristic(this.platform.Characteristic.SerialNumber, this.robot.serialNumber);
     }
 
-    // 3) Interrupted Timeout (fires only if no completion in X minutes)
-    if (this.timeoutMinutes > 0) {
+    // Interrupted Timeout (stateless pulse)
+    {
       const name = `${robot.name} • Cycle Interrupted Timeout`;
       const uuid = this.platform.api.hap.uuid.generate(robot.serialNumber + '-cycle-interrupted-timeout-switch');
-      this.timeoutAccessory = this.platform.getOrCreateAccessory(uuid, name);
-      this.timeoutAccessory.category = this.platform.api.hap.Categories.SWITCH;
+      this.timeoutAcc = this.platform.getOrCreateAccessory(uuid, name);
+      this.timeoutAcc.category = this.platform.api.hap.Categories.SWITCH;
 
       this.timeoutSwitch =
-        this.timeoutAccessory.getService(this.platform.Service.Switch)
-        ?? this.timeoutAccessory.addService(this.platform.Service.Switch, 'Cycle Interrupted Timeout', 'cycle-timeout');
+        this.timeoutAcc.getService(this.platform.Service.Switch) ??
+        this.timeoutAcc.addService(this.platform.Service.Switch, 'Cycle Interrupted Timeout', 'cycle-interrupted-timeout-switch');
 
-      this.timeoutSwitch
-        .setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Cycle Interrupted Timeout')
-        .getCharacteristic(this.platform.Characteristic.On)
-        .onSet(async (value) => { if (value) this.pulse(this.timeoutSwitch!, this.timeoutPulseMs); })
-        .updateValue(false);
+      this.timeoutSwitch.getCharacteristic(this.platform.Characteristic.On)
+        .onGet(() => false)
+        .onSet(async (v) => {
+          if (v) this.pulse(this.timeoutSwitch, this.timeoutPulseMs());
+        });
 
-      this.timeoutAccessory.getService(this.platform.Service.AccessoryInformation)
+      this.timeoutAcc.getService(this.platform.Service.AccessoryInformation)
         ?.setCharacteristic(this.platform.Characteristic.Manufacturer, 'Whisker')
         .setCharacteristic(this.platform.Characteristic.Model, 'Litter-Robot 4')
         .setCharacteristic(this.platform.Characteristic.SerialNumber, this.robot.serialNumber);
     }
   }
 
-  // Event hooks called by LitterRobot
+  // ---- Public API consumed by litterRobot.ts ----
+
   pressCompleted() {
-    if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK switch → Cycle Completed (pulse)');
-    this.pulse(this.completedSwitch, this.completedPulseMs);
+    this.pulse(this.completedSwitch, this.completedPulseMs());
   }
 
   setInterrupted() {
-    if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK switch → Cycle Interrupted (%s)', this.interruptedMode);
-    if (this.interruptedMode === 'pulse') {
-      this.pulse(this.interruptedSwitch, this.interruptedPulseMs);
-    } else {
-      this.interruptedSwitch.updateCharacteristic(this.platform.Characteristic.On, true);
-    }
+    this.interruptedAcc.context._on = true;
+    this.interruptedSwitch.updateCharacteristic(this.platform.Characteristic.On, true);
   }
 
   clearInterrupted() {
-    if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK switch → Cycle Interrupted OFF (completion)');
+    this.interruptedAcc.context._on = false;
     this.interruptedSwitch.updateCharacteristic(this.platform.Characteristic.On, false);
   }
 
   pressInterruptedTimeout() {
-    if (!this.timeoutSwitch) return;
-    if (this.platform?.config?.debug) this.platform.log.info('[DEBUG] HK switch → Cycle Interrupted Timeout (pulse)');
-    this.pulse(this.timeoutSwitch, this.timeoutPulseMs);
+    this.pulse(this.timeoutSwitch, this.timeoutPulseMs());
   }
 
-  // Momentary pulse helper
-  private pulse(svc: Service, ms: number) {
-    const On = this.platform.Characteristic.On;
-    svc.updateCharacteristic(On, true);
-    setTimeout(() => svc.updateCharacteristic(On, false), Math.max(0, ms));
-  }
-
-  // Persist last status code (we reuse existing context field)
+  // Persist last code across restarts on the Completed accessory
   get lastStatusCode(): string | undefined {
-    return this.completedAccessory.context.lastStatusCode as string | undefined;
+    return this.completedAcc.context.lastStatusCode as string | undefined;
   }
   set lastStatusCode(code: string | undefined) {
-    this.completedAccessory.context.lastStatusCode = code;
+    this.completedAcc.context.lastStatusCode = code;
+  }
+
+  // ---- Helpers ----
+
+  private pulse(service: Service, ms: number) {
+    service.updateCharacteristic(this.platform.Characteristic.On, true);
+    setTimeout(() => {
+      service.updateCharacteristic(this.platform.Characteristic.On, false);
+    }, Math.max(200, ms)); // minimum 200ms so Home notices
+  }
+
+  private completedPulseMs(): number {
+    const cfg = this.platform.config as any;
+    const sec = Number(cfg?.completedPulseSeconds ?? 1);
+    return Math.max(0, sec) * 1000;
+  }
+
+  private timeoutPulseMs(): number {
+    const cfg = this.platform.config as any;
+    const sec = Number(cfg?.interruptedTimeoutPulseSeconds ?? 1);
+    return Math.max(0, sec) * 1000;
   }
 }
