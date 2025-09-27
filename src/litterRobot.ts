@@ -54,9 +54,8 @@ export class LitterRobot {
   }
 
   private get debugEnabled(): boolean {
-    // support both "debug" and "debugMode" flags
-    // @ts-expect-error allow unknown keys on config
-    return Boolean(this.config.debug || this.config.debugMode);
+    const cfg = this.config as any;
+    return Boolean(cfg?.debug || cfg?.debugMode);
   }
 
   private handleRobotUpdate(device: Robot) {
@@ -83,9 +82,7 @@ export class LitterRobot {
   private normalizeStatusCode(s: string): string {
     const v = (s ?? '').toString().trim().toLowerCase();
     if (!v) return '';
-    // Known short codes
     if (['ccc', 'csi', 'csf', 'ccp', 'rdy', 'df1', 'df2', 'dfs'].includes(v)) return v;
-    // Heuristics from descriptive strings
     if (v.includes('complete') || v.includes('finished') || v.includes('done')) return 'ccc';
     if (v.includes('interrupted') || v.includes('stopped') || v.includes('pause')) return 'csi';
     if (v.includes('cat sensor') && v.includes('fault')) return 'csf';
@@ -96,13 +93,8 @@ export class LitterRobot {
 
   private onStatusChanged(newCode: string, oldCode?: string) {
     if (STATUS_COMPLETE.has(newCode)) {
-      // Pulse Completed switch
       this.cycleEvents.pressCompleted();
-
-      // Clear Interrupted (turn OFF if latched)
       this.cycleEvents.clearInterrupted();
-
-      // Cancel any running interrupted timeout
       if (this.interruptedTimer) {
         clearTimeout(this.interruptedTimer);
         this.interruptedTimer = null;
@@ -112,24 +104,19 @@ export class LitterRobot {
     }
 
     if (STATUS_INTERRUPTED.has(newCode)) {
-      // Set/pulse Interrupted switch based on config
       this.cycleEvents.setInterrupted();
 
-      // Start/restart timeout window
-      // @ts-expect-error allow unknown keys on config
-      const mins = Math.max(0, Number(this.config.interruptedTimeoutMinutes ?? 5));
+      const cfg = this.config as any;
+      const mins = Math.max(0, Number(cfg?.interruptedTimeoutMinutes ?? 5));
       if (mins > 0) {
         if (this.interruptedTimer) clearTimeout(this.interruptedTimer);
         this.interruptedTimer = setTimeout(() => {
           if (this.debugEnabled) this.log.info('[DEBUG] interrupted timer expired → firing timeout');
           this.cycleEvents.pressInterruptedTimeout();
-          // Leave Interrupted as-is (if latched) for user visibility
         }, mins * 60 * 1000);
         if (this.debugEnabled) this.log.info('[DEBUG] interrupted timer started: %d min', mins);
       }
       return;
     }
-
-    // Other states: no-op for event switches
   }
 }
