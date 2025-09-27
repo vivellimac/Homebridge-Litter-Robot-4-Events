@@ -142,47 +142,52 @@ public update(device: Robot): void {
     }
   }
 
-  private normalizeStatusCode(s: string): string {
-    let v = (s ?? '').toString().trim();
-    if (!v) return '';
+ private normalizeStatusCode(s: string): string {
+  let v = (s ?? '').toString().trim();
+  if (!v) return '';
 
-    const low = v.toLowerCase();
-    if (CODE_LABELS[low]) return low;
+  // short-circuit exact constants
+  const exact = v.toLowerCase();
+  if (exact === 'robot_clean') return 'ccp';
+  if (exact === 'robot_idle') return 'rdy';
+  if (CODE_LABELS[exact]) return exact;
 
-    if (this.name && v.toLowerCase().startsWith(this.name.toLowerCase())) {
-      v = v.slice(this.name.length).trim();
-    }
-    const t = v.toLowerCase();
-
-    const KEYWORD_MAP: Array<[string | RegExp, string]> = [
-      [/complete|completed|finish|finished|done/, 'ccc'],
-      [/clean(ing)?|cycle in progress|in\s*progress|cycling/, 'ccp'],
-      [/\bidle\b|ready|standby/, 'rdy'],
-      [/interrupt|paused?|stopp?ed/, 'csi'],
-      [/cat\s*sensor.*fault/, 'csf'],
-      [/drawer.*full/, 'dfs'],
-      [/pinch.*detect/, 'pd'],
-      [/bonnet.*removed/, 'br'],
-      [/home position.*fault|hpf/, 'hpf'],
-      [/dump.*position.*fault|dpf/, 'dpf'],
-      [/over\s*torque.*fault|otf/, 'otf'],
-      [/powering\s*up/, 'pwru'],
-      [/powering\s*down/, 'pwrd'],
-      [/offline/, 'offline'],
-    ];
-
-    for (const [pat, code] of KEYWORD_MAP) {
-      if ((pat instanceof RegExp && pat.test(t)) || (typeof pat === 'string' && t.includes(pat))) {
-        return code;
-      }
-    }
-
-    if (t.includes('fault')) return 'csf';
-    if (t.includes('pause')) return 'p';
-    if (t.includes('off')) return 'off';
-
-    return '';
+  // strip the robot name prefix if present
+  if (this.name && v.toLowerCase().startsWith(this.name.toLowerCase())) {
+    v = v.slice(this.name.length).trim();
   }
+
+  // normalize separators → spaces to make word regexes work
+  const t = v.toLowerCase().replace(/[_-]+/g, ' ');
+
+  const KEYWORD_MAP: Array<[RegExp, string]> = [
+    [/(^|\s)(complete|completed|finish(ed)?|done)(\s|$)/, 'ccc'],
+    [/(^|\s)(clean(ing)?|cycle in progress|in\s*progress|cycling)(\s|$)/, 'ccp'],
+    [/(^|\s)(idle|ready|standby)(\s|$)/, 'rdy'],
+    [/(^|\s)(interrupt|paused?|stopp?ed)(\s|$)/, 'csi'],
+    [/cat\s*sensor.*fault/, 'csf'],
+    [/drawer.*full/, 'dfs'],
+    [/pinch.*detect/, 'pd'],
+    [/bonnet.*removed/, 'br'],
+    [/home position.*fault|hpf/, 'hpf'],
+    [/dump.*position.*fault|dpf/, 'dpf'],
+    [/over\s*torque.*fault|otf/, 'otf'],
+    [/powering\s*up/, 'pwru'],
+    [/powering\s*down/, 'pwrd'],
+    [/(^|\s)offline(\s|$)/, 'offline'],
+  ];
+
+  for (const [pat, code] of KEYWORD_MAP) {
+    if (pat.test(t)) return code;
+  }
+
+  if (t.includes('fault')) return 'csf';
+  if (t.includes('pause')) return 'p';
+  if (t.includes('off')) return 'off';
+
+  return '';
+}
+
 
   private fireInterrupted() {
     this.cycleEvents.setInterrupted();
