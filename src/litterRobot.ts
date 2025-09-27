@@ -79,14 +79,22 @@ export class LitterRobot {
     this.cycleEvents = new CycleEventsAccessory(this.platform, this.account, this);
   }
 
-  public update(device: Robot): void {
-    this.globeLight?.update(device.isNightLightLEDOn);
-    this.occupancySensor?.update(device.robotStatus);
-    if (!(this.config as any).disableDrawerSensor) {
-      this.drawerLevel?.update(device.DFILevelPercent);
-    }
-    this.handleRobotUpdate(device);
+public update(device: Robot): void {
+  const nightLightOn: boolean = device.isNightLightLEDOn === true;
+  const statusText: string = device.robotStatus ?? '';
+  const dfiPercent: number = Number(
+    device.DFILevelPercent ?? 0
+  );
+
+  this.globeLight?.update(nightLightOn);
+  this.occupancySensor?.update(statusText);
+  if (!(this.config as any).disableDrawerSensor) {
+    this.drawerLevel?.update(Number.isFinite(dfiPercent) ? dfiPercent : 0);
   }
+
+  this.handleRobotUpdate(device);
+}
+
 
   private handleRobotUpdate(device: Robot) {
     const raw = (device.robotStatus ?? '').toString();
