@@ -118,12 +118,23 @@ export class LitterRobot {
     this.handleRobotUpdate(device as RobotMaybe);
   }
 
+  /** Extract the raw status code if present (snake/camel), else try a nested shape. */
+  private getRawStatusCode(device: RobotMaybe): string | null {
+    const s1 = device.status_code ?? device.statusCode;
+    if (s1 && typeof s1 === 'string' && s1.trim()) {
+      return s1.trim();
+    }
+    // Allow a nested fallback (e.g., device.status.code) if upstream changes
+    const nested = (device as unknown as { status?: { code?: string } })?.status?.code;
+    return typeof nested === 'string' && nested.trim() ? nested.trim() : null;
+  }
+
   /** Prefer HA-style status_code if present; fall back to robotStatus. */
   private getBestStatusCode(device: RobotMaybe): string {
-    const rawCode = device.status_code ?? device.statusCode;
-    if (rawCode && typeof rawCode === 'string' && rawCode.trim()) {
+    const rawCode = this.getRawStatusCode(device);
+    if (rawCode) {
       this.platform.d('status_code present %s → %s', this.name, rawCode);
-      return rawCode.trim().toLowerCase();
+      return rawCode.toLowerCase();
     }
     const raw = (device.robotStatus ?? '').toString();
     this.platform.d('robotStatus raw %s %s', this.name, raw);
@@ -131,10 +142,24 @@ export class LitterRobot {
   }
 
   private handleRobotUpdate(device: RobotMaybe): void {
-    this.platform.d('device payload: %s', JSON.stringify(device));
+    const sc = this.getRawStatusCode(device);
+
+    // Unified, compact payload log with explicit status_code included.
+    this.platform.d(
+      '[poll] %s payload=%s',
+      this.name,
+      JSON.stringify({
+        serial: device.serial,
+        status: device.robotStatus,
+        status_code: sc ?? null,
+        catDetect: device.catDetect,
+        dfi: device.DFILevelPercent,
+        night: device.isNightLightLEDOn,
+      }),
+    );
 
     const code = this.getBestStatusCode(device);
-    this.platform.d('mapped status %s → %s', this.name, code || '∅');
+    this.platform.d('[poll] %s mapped → %s', this.name, code || '∅');
     if (!code) {
       return;
     }
