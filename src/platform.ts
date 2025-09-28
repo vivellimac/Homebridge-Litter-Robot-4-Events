@@ -197,7 +197,8 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
       for (const device of arr) {
         // Show every key we got for this device, and the full payload.
-        const keys = Object.keys(device as Record<string, unknown>).join(',');
+        const dict: Record<string, unknown> = device as unknown as Record<string, unknown>;
+        const keys = Object.keys(dict).join(',');
         this.r('[device keys] %s -> %s', device?.name ?? '<unnamed>', keys);
 
         const sc =
