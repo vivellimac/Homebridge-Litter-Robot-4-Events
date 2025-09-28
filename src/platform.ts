@@ -17,8 +17,12 @@ type PluginConfig = PlatformConfig & {
   debug?: boolean;
 };
 
-// GraphQL sometimes returns snake_case or camelCase; accept either.
-type RobotMaybe = Robot & Partial<{ status_code: string; statusCode: string }>;
+// Accept either snake_case / camelCase and (optionally) a nested status.code
+type RobotMaybe = Robot & Partial<{
+  status_code: string;
+  statusCode: string;
+  status: { code?: string } | null;
+}>;
 
 export class LitterRobotPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
@@ -120,7 +124,8 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   }
 
   public pollForUpdates(account: Whisker, interval: number): void {
-    const body = JSON.stringify({
+    // Wide query (tries nested compact status code if supported)
+    const wide = JSON.stringify({
       query: `{
         query: getLitterRobot4ByUser(userId: "${account.accountId}") {
           serial
@@ -129,46 +134,81 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
           robotStatus
           catDetect
           DFILevelPercent
-          status_code
-          statusCode
+          status { code }   # optional: some schemas expose this
         }
       }`,
     });
 
-    // Fire-and-forget loop with explicit error handling.
+    // Narrow query (always supported)
+    const narrow = JSON.stringify({
+      query: `{
+        query: getLitterRobot4ByUser(userId: "${account.accountId}") {
+          serial
+          name
+          isNightLightLEDOn
+          robotStatus
+          catDetect
+          DFILevelPercent
+        }
+      }`,
+    });
+
+    // Shared response handler
+    const handle = (response: unknown): void => {
+      const data = (response as { data?: { data?: { query?: RobotMaybe[] } } })?.data?.data?.query ?? [];
+      this.d('poll -> %d device(s)', data.length);
+
+      for (const device of data) {
+        const sc =
+          device.status?.code ??
+          device.status_code ??
+          device.statusCode ??
+          null;
+
+        this.d(
+          '[poll] %s payload=%s',
+          device.name,
+          JSON.stringify({
+            serial: device.serial,
+            status: device.robotStatus,
+            status_code: sc,
+            catDetect: device.catDetect,
+            dfi: device.DFILevelPercent,
+            night: device.isNightLightLEDOn,
+          }),
+        );
+      }
+
+      // Propagate updates to device objects.
+      for (const device of data) {
+        const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
+        if (lr) {
+          lr.update(device as Robot);
+        }
+      }
+
+      this.d('next poll in %d ms', interval);
+      setTimeout(() => this.pollForUpdates(account, interval), interval);
+    };
+
+    // Try wide → fallback to narrow automatically
     void account
-      .sendCommand(body)
-      .then((response) => {
-        const data = (response?.data?.data?.query ?? []) as RobotMaybe[];
-        this.d('poll -> %d device(s)', data.length);
+      .sendCommand(wide)
+      .then((resp: unknown) => {
+        const r = resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } } | undefined;
+        const hasErrors = Array.isArray(r?.data?.errors) && (r?.data?.errors?.length ?? 0) > 0;
+        const hasData = Boolean(r?.data?.data?.query);
 
-        for (const device of data) {
-          const sc = device.status_code ?? device.statusCode ?? null;
+        if (hasErrors || !hasData) {
           this.d(
-            '[poll] %s payload=%s',
-            device.name,
-            JSON.stringify({
-              serial: device.serial,
-              status: device.robotStatus,
-              status_code: sc,
-              catDetect: device.catDetect,
-              dfi: device.DFILevelPercent,
-              night: device.isNightLightLEDOn,
-            }),
+            'wide query failed/empty; falling back%s',
+            hasErrors ? ` (errors: ${JSON.stringify(r?.data?.errors)})` : '',
           );
+          return account.sendCommand(narrow);
         }
-
-        // Propagate updates to device objects.
-        for (const device of data) {
-          const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
-          if (lr) {
-            lr.update(device as Robot);
-          }
-        }
-
-        this.d('next poll in %d ms', interval);
-        setTimeout(() => this.pollForUpdates(account, interval), interval);
+        return resp;
       })
+      .then(handle)
       .catch((err: unknown) => {
         const msg = (err as Error)?.message ?? String(err);
         this.log.warn('Poll failed: %s', msg);
