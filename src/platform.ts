@@ -17,6 +17,8 @@ type PluginConfig = PlatformConfig & {
   debug?: boolean;
 };
 
+type RobotMaybe = Robot & Partial<{ status_code: string; statusCode: string }>;
+
 export class LitterRobotPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
   public readonly Characteristic: typeof Characteristic = this.api.hap.Characteristic;
@@ -57,6 +59,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   /** unified debug */
   public d(message: string, ...params: unknown[]): void {
     if (this.debugEnabled) {
+      // use .info to surface clearly in HB logs with a [DEBUG] tag
       this.log.info(`[DEBUG] ${message}`, ...params);
     }
   }
@@ -127,8 +130,17 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     account.sendCommand(command)
       .then((response) => {
         const data: Robot[] = response?.data?.data?.query ?? [];
-        if (this.debugEnabled) {
-          this.log.info('[DEBUG] poll -> %d device(s)', data.length);
+        this.d('poll -> %d device(s)', data.length);
+
+        for (const device of data as RobotMaybe[]) {
+          this.d('[poll] %s payload=%s', device.name, JSON.stringify({
+            serial: device.serial,
+            status: device.robotStatus,
+            status_code: device.status_code ?? device.statusCode ?? null,
+            catDetect: device.catDetect,
+            dfi: device.DFILevelPercent,
+            night: device.isNightLightLEDOn,
+          }));
         }
 
         data.forEach((device: Robot) => {
