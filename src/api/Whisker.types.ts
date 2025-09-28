@@ -13,4 +13,6 @@ export interface Robot {
   robotStatus?: string;                  // we normalize this downstream
   catDetect?: boolean | number | string | null; // API can vary; we coerce to boolean where needed
   DFILevelPercent?: number | null;       // drawer fill % may be null
+  status_code?: string;
+  statusCode?: string;
 }
