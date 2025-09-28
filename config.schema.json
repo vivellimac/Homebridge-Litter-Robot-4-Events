@@ -8,22 +8,20 @@
       "email": {
         "title": "Litter Robot App Email",
         "type": "string",
-        "required": true,
-        "default": "my_email"
+        "format": "email",
+        "description": "Account email used in the official Whisker app."
       },
       "password": {
         "title": "Litter Robot App Password",
         "type": "string",
-        "required": true,
-        "default": "my_password",
-        "format": "password"
+        "format": "password",
+        "description": "Account password (stored by Homebridge; not logged)."
       },
       "disableDrawerSensor": {
         "type": "boolean",
         "title": "Disable Drawer Level Sensor",
         "description": "Disables monitoring of the drawer level sensor.",
-        "default": false,
-        "required": false
+        "default": false
       },
       "debug": {
         "title": "Enable Debug Logging",
@@ -59,6 +57,7 @@
         "default": 15,
         "description": "If 'Clean In Progress' (ccp) lasts longer than this, treat it as an interrupted/stalled cycle and fire the timeout switch."
       }
-    }
+    },
+    "required": ["email", "password"]
   }
 }
