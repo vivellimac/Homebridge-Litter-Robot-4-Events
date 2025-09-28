@@ -78,11 +78,20 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     let whiskerClient: Whisker | undefined;
     try {
       const { username, password, token, baseUrl } = this.config;
-      if (token || (username && password)) {
-        whiskerClient = new Whisker({ username, password, token, baseUrl });
-      }
+
+  // If your Whisker ctor is (log, opts, api, config), this satisfies TS.
+  // Using `any` here also tolerates minor ctor differences across commits.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const WhiskerCtor: any = Whisker;
+      whiskerClient = new WhiskerCtor(
+        this.log,
+        { username, password, token, baseUrl },
+        this.api,
+        this.config,
+      );
     } catch (e) {
-      this.log.warn(`Whisker client init skipped or failed: ${(e as Error).message}`);
+      const err = e as Error;
+      this.log.warn(`Whisker client init skipped or failed: ${err.message}`);
     }
     this.whisker = whiskerClient;
 
