@@ -1,11 +1,8 @@
-import { API } from 'homebridge';
-
+import type { API } from 'homebridge';
 import { PLATFORM_NAME } from './settings';
 import { LitterRobotPlatform } from './platform';
 
-/**
- * This method registers the platform with Homebridge
- */
-export = (api: API) => {
+/** Homebridge entrypoint hook */
+export = (api: API): void => {
   api.registerPlatform(PLATFORM_NAME, LitterRobotPlatform);
 };
