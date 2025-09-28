@@ -7,6 +7,7 @@ import {
   Service,
   Characteristic,
 } from 'homebridge';
+
 import Whisker from './api/Whisker';
 import { LitterRobot } from './litterRobot';
 import { PLUGIN_NAME, PLATFORM_NAME } from './settings';
@@ -15,16 +16,7 @@ import { Robot } from './api/Whisker.types';
 type PluginConfig = PlatformConfig & {
   disableDrawerSensor?: boolean;
   debug?: boolean;
-  /** When true, dump raw API responses & full device payloads (capped). */
-  debugRaw?: boolean;
 };
-
-// Accept either snake_case / camelCase and (optionally) a nested status.code
-type RobotMaybe = Robot & Partial<{
-  status_code: string;
-  statusCode: string;
-  status: { code?: string } | null;
-}>;
 
 export class LitterRobotPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
@@ -35,87 +27,93 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
   private static readonly POLL_INTERVAL_MS = 5000;
 
-  private get cfg(): PluginConfig {
-    return this.config as PluginConfig;
-  }
-
-  private get debugEnabled(): boolean {
-    return Boolean(this.cfg.debug);
-  }
-
-  private get rawEnabled(): boolean {
-    return Boolean(this.cfg.debugRaw);
-  }
-
   constructor(
     public readonly log: Logger,
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
-    this.log.debug('Finished initializing platform:', this.config.name);
+    this.log.warn('[LR4-Events] BUILD TAG: status-logging-min'); // runtime confirmation
 
     const account = new Whisker(this.config, this.log, this.accessories, this.api);
 
-    // Use async/await to avoid dangling promises; handle errors explicitly.
-    this.api.on('didFinishLaunching', async () => {
-      try {
-        this.log.debug('Executed didFinishLaunching callback');
-        await account.authenticate();
-        this.log.debug('Authenticated, discovering devices…');
-        await this.discoverDevices(account);
-        this.pollForUpdates(account, LitterRobotPlatform.POLL_INTERVAL_MS);
-      } catch (err) {
-        const msg = (err as Error)?.message ?? String(err);
-        this.log.error('Startup failed: %s', msg);
-      }
+    this.api.on('didFinishLaunching', () => {
+      account.authenticate().then(() => {
+        this.discoverDevices(account).then(() => {
+          this.pollForUpdates(account, LitterRobotPlatform.POLL_INTERVAL_MS);
+        });
+      });
     });
   }
 
-  /** Unified debug (surfaces clearly in HB logs when enabled) */
-  public d(message: string, ...params: unknown[]): void {
-    if (this.debugEnabled) {
-      this.log.info(`[DEBUG] ${message}`, ...params);
-    }
+  private get debugEnabled(): boolean {
+    const cfg = this.config as PluginConfig;
+    return Boolean(cfg?.debug);
   }
 
-  /** Very loud logging; only emits when debugRaw=true */
-  public r(message: string, ...params: unknown[]): void {
-    if (this.rawEnabled) {
-      this.log.info(`[RAW] ${message}`, ...params);
-    }
+  // --- Status mapping helpers (robotStatus -> short code & label) ---
+
+  private static readonly CODE_LABELS: Record<string, string> = {
+    ccp: 'Clean Cycle In Progress',
+    ccc: 'Clean Cycle Complete',
+    rdy: 'Ready / Idle',
+    pd: 'Pinch Detect',
+    br: 'Bonnet Removed',
+    hpf: 'Home Position Fault',
+    dpf: 'Dump Position Fault',
+    otf: 'Over Torque Fault',
+    p: 'Paused',
+    csi: 'Cat Sensor Interrupted',
+    csf: 'Cat Sensor Fault',
+    offline: 'Offline',
+    dfs: 'Drawer Full',
+    df2: 'Drawer Almost Full (1)',
+    df1: 'Drawer Almost Full (2)',
+    off: 'Off',
+  };
+
+  /** Map raw robotStatus string to our short code set */
+  private mapStatusCode(raw: string): string {
+    const s = String(raw ?? '').toLowerCase();
+
+    // direct known values from app/firmware
+    if (s === 'robot_clean') return 'ccp';
+    if (s === 'robot_idle') return 'rdy';
+    if (s.includes('clean') && s.includes('complete')) return 'ccc';
+
+    // keyword-based mapping (covers many variants)
+    if (s.includes('pinch')) return 'pd';
+    if (s.includes('bonnet')) return 'br';
+    if (s.includes('home') && s.includes('fault')) return 'hpf';
+    if (s.includes('dump') && s.includes('fault')) return 'dpf';
+    if (s.includes('torque') && s.includes('fault')) return 'otf';
+    if (s.includes('pause') || s.includes('stopp') || s.includes('interrupt')) return 'p'; // generic pause/interrupt
+    if (s.includes('cat') && s.includes('sensor') && s.includes('interrupt')) return 'csi';
+    if (s.includes('cat') && s.includes('sensor') && s.includes('fault')) return 'csf';
+    if (s.includes('offline')) return 'offline';
+    if (s.includes('drawer') && s.includes('full')) return 'dfs';
+    if (s.includes('off')) return 'off';
+
+    // fallbacks
+    if (s.includes('clean') && (s.includes('in progress') || s.includes('cycle'))) return 'ccp';
+    if (s.includes('idle') || s.includes('ready') || s.includes('standby')) return 'rdy';
+
+    return '';
   }
 
-
-  private s(value: unknown, cap = 12000): string {
-    let out: string;
-    try {
-      const tmp = JSON.stringify(value);
-      out = typeof tmp === 'string' ? tmp : String(value);
-    } catch {
-      out = String(value);
-    }
-    if (out.length > cap) {
-      return out.slice(0, cap) + `… [+${out.length - cap} bytes truncated]`;
-    }
-    return out;
-  }
+  // --- Platform basics ---
 
   public getOrCreateAccessory(uuid: string, name: string): PlatformAccessory {
-    const existingAccessory = this.accessories.find((a) => a.UUID === uuid);
+    const existingAccessory = this.accessories.find(a => a.UUID === uuid);
     if (existingAccessory) {
-      const skipDrawerLevel = this.cfg.disableDrawerSensor === true;
-      const secondService = existingAccessory.services[1];
-      const isDrawerLevel = secondService?.constructor?.name === 'HumiditySensor';
+      const skipDrawerLevel = (this.config as PluginConfig).disableDrawerSensor;
+      const isDrawerLevel = existingAccessory.services[1]?.constructor?.name === 'HumiditySensor';
       if (skipDrawerLevel && isDrawerLevel) {
-        this.log.info('Skipping DrawerLevel:', name);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
         return existingAccessory;
       }
-      this.log.info('Restoring existing accessory:', name);
       return existingAccessory;
     }
 
-    this.log.info('Adding new accessory:', name);
     const accessory = new this.api.platformAccessory(name, uuid);
     this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     this.accessories.push(accessory);
@@ -123,13 +121,11 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   }
 
   configureAccessory(accessory: PlatformAccessory): void {
-    this.log.info('Loading accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
   }
 
-  public async discoverDevices(account: Whisker): Promise<void> {
-    // Keep this query light; status fields not required for discovery.
-    const body = JSON.stringify({
+  async discoverDevices(account: Whisker): Promise<void> {
+    const data = JSON.stringify({
       query: `{
         query: getLitterRobot4ByUser(userId: "${account.accountId}") {
           serial
@@ -139,38 +135,19 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       }`,
     });
 
-    const response = await account.sendCommand(body);
-    if (this.rawEnabled) {
-      this.r('discover response: %s', this.s(response));
-    }
-    const devices = (response?.data?.data?.query ?? []) as Robot[];
-    if (this.debugEnabled) {
-      this.d('discovered devices -> %s', this.s(devices.map((d) => d.serial)));
-    }
-    for (const device of devices) {
-      this.log.debug('Discovered device:', device.name, device.serial);
-      this.litterRobots.push(new LitterRobot(account, device, this, this.log, this.config));
-    }
+    return account.sendCommand(data).then((response) => {
+      const devices: Robot[] = response?.data?.data?.query ?? [];
+      if (this.debugEnabled) {
+        this.log.info('[DEBUG] discovered devices -> %s', JSON.stringify(devices.map(d => d.serial)));
+      }
+      for (const device of devices) {
+        this.litterRobots.push(new LitterRobot(account, device, this, this.log, this.config));
+      }
+    });
   }
 
-  public pollForUpdates(account: Whisker, interval: number): void {
-    // Wide query (attempt nested compact status code if supported)
-    const wide = JSON.stringify({
-      query: `{
-        query: getLitterRobot4ByUser(userId: "${account.accountId}") {
-          serial
-          name
-          isNightLightLEDOn
-          robotStatus
-          catDetect
-          DFILevelPercent
-          status { code }   # optional: some schemas expose this
-        }
-      }`,
-    });
-
-    // Narrow query (always supported)
-    const narrow = JSON.stringify({
+  pollForUpdates(account: Whisker, interval: number): void {
+    const command = JSON.stringify({
       query: `{
         query: getLitterRobot4ByUser(userId: "${account.accountId}") {
           serial
@@ -183,104 +160,41 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       }`,
     });
 
-    // Shared response handler
-    const handle = (response: unknown, tag: 'wide' | 'narrow'): void => {
-      if (this.rawEnabled) {
-        const rAny = response as { data?: { errors?: unknown; data?: unknown } };
-        this.r('%s response errors: %s', tag, this.s(rAny?.data?.errors));
-        this.r('%s response data: %s', tag, this.s(rAny?.data?.data));
-      }
+    account.sendCommand(command)
+      .then((response) => {
+        const data: Robot[] = response?.data?.data?.query ?? [];
+        if (this.debugEnabled) this.log.info('[DEBUG] poll -> %d device(s)', data.length);
 
-      const list =
-        (response as { data?: { data?: { query?: RobotMaybe[] } } })?.data?.data?.query ?? [];
-      const arr = Array.isArray(list) ? list : [];
-      this.d('poll -> %d device(s)', arr.length);
+        for (const device of data) {
+          // --- the key debug line you asked for ---
+          const raw = String(device.robotStatus ?? '');
+          const code = this.mapStatusCode(raw);
+          const label = LitterRobotPlatform.CODE_LABELS[code] ?? 'Unknown';
 
-      for (const device of arr) {
-        // Show every key we got for this device, and the full payload.
-        const dict: Record<string, unknown> = device as unknown as Record<string, unknown>;
-        const keys = Object.keys(dict).join(',');
-        this.r('[device keys] %s -> %s', device?.name ?? '<unnamed>', keys);
-
-        const sc =
-          device?.status?.code ??
-          device?.status_code ??
-          device?.statusCode ??
-          null;
-
-        // Compact payload in normal debug:
-        this.d(
-          '[poll] %s payload=%s',
-          device?.name,
-          this.s({
-            serial: device?.serial,
-            status: device?.robotStatus,
-            status_code: sc,
-            catDetect: device?.catDetect,
-            dfi: device?.DFILevelPercent,
-            night: device?.isNightLightLEDOn,
-          }),
-        );
-
-        // Full device object when debugRaw is on:
-        this.r('[device raw] %s -> %s', device?.name ?? '<unnamed>', this.s(device));
-      }
-
-      // Propagate updates to device objects.
-      for (const device of arr) {
-        const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
-        if (lr) {
-          lr.update(device as Robot);
-        }
-      }
-
-      this.d('next poll in %d ms', interval);
-      setTimeout(() => this.pollForUpdates(account, interval), interval);
-    };
-
-    // Try wide → fallback to narrow if errors OR empty list
-    void account
-      .sendCommand(wide)
-      .then((resp: unknown) => {
-        const r = resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } } | undefined;
-        const errs = r?.data?.errors ?? [];
-        const q = r?.data?.data?.query as unknown;
-
-        const hasErrors = Array.isArray(errs) && errs.length > 0;
-        const isArray = Array.isArray(q);
-        const isEmptyArray = isArray && q.length === 0;
-        const hasNonEmptyData = isArray && q.length > 0;
-
-        if (hasErrors) {
-          this.r('wide query errors: %s', this.s(errs));
+          if (this.debugEnabled) {
+            this.log.info(
+              '[DEBUG] status %s: raw=%s → %s (%s)',
+              device.name,
+              raw || '∅',
+              code || '∅',
+              label,
+            );
+          }
         }
 
-        if (hasErrors || !hasNonEmptyData) {
-          this.d(
-            'wide query failed/empty (errors=%s, empty=%s) → fallback',
-            String(hasErrors),
-            String(isEmptyArray),
-          );
-          return account.sendCommand(narrow).then((resp2) => ({ resp, resp2 }));
+        // hand off to device objects
+        for (const device of data) {
+          const lr = this.litterRobots.find(b => b.serialNumber === device.serial);
+          if (lr) lr.update(device);
         }
 
-        return { resp, resp2: null as unknown };
-      })
-      .then((bundle: { resp: unknown; resp2: unknown } | undefined) => {
-        if (!bundle) {
-          // Should not happen; defensive.
-          return;
-        }
-        const { resp, resp2 } = bundle;
-        if (resp2) {
-          handle(resp2, 'narrow');
-        } else {
-          handle(resp, 'wide');
-        }
+        if (this.debugEnabled) this.log.info('[DEBUG] next poll in %d ms', interval);
+        setTimeout(() => this.pollForUpdates(account, interval), interval);
       })
       .catch((err: unknown) => {
         const msg = (err as Error)?.message ?? String(err);
         this.log.warn('Poll failed: %s', msg);
+        if (this.debugEnabled) this.log.info('[DEBUG] next poll in %d ms (after error)', interval);
         setTimeout(() => this.pollForUpdates(account, interval), interval);
       });
   }
