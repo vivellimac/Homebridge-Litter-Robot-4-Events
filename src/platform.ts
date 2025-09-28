@@ -121,7 +121,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     return accessory;
   }
 
-  public configureAccessory(accessory: PlatformAccessory): void {
+  configureAccessory(accessory: PlatformAccessory): void {
     this.log.info('Loading accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
   }
@@ -241,8 +241,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     void account
       .sendCommand(wide)
       .then((resp: unknown) => {
-        const r =
-          (resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } }) ?? undefined;
+        const r = resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } } | undefined;
         const errs = r?.data?.errors ?? [];
         const q = r?.data?.data?.query as unknown;
 
@@ -268,6 +267,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       })
       .then((bundle: { resp: unknown; resp2: unknown } | undefined) => {
         if (!bundle) {
+          // Should not happen; defensive.
           return;
         }
         const { resp, resp2 } = bundle;
