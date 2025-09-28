@@ -41,8 +41,7 @@ function safeInspect(value: unknown, depth = 6): string {
 }
 
 function getRobotId(robot: Robot): string | undefined {
-  // Accept several possible id keys without using `any`
-  const r = robot as Record<string, unknown>;
+  const r = robot as unknown as Record<string, unknown>;
   const keys = ['id', 'serial', 'device_id', 'robotId'];
   for (const k of keys) {
     const v = r[k];
@@ -52,7 +51,7 @@ function getRobotId(robot: Robot): string | undefined {
 }
 
 function getRobotName(robot: Robot, fallbackId?: string): string {
-  const r = robot as Record<string, unknown>;
+  const r = robot as unknown as Record<string, unknown>;
   if (typeof r.name === 'string' && r.name.trim().length > 0) return r.name;
   return `Litter-Robot${fallbackId ? ` ${fallbackId}` : ''}`;
 }
@@ -62,8 +61,6 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   public readonly Characteristic: typeof Characteristic;
 
   public readonly accessories: PlatformAccessory[] = [];
-  public readonly litterRobots = new Map<UUID, LitterRobot>();
-
   public readonly debugEnabled: boolean;
   public readonly d: (msg: string | unknown, ...args: unknown[]) => void;
 
@@ -78,7 +75,6 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     this.Characteristic = this.api.hap.Characteristic;
 
     this.debugEnabled = Boolean(this.config?.debug);
-
     this.d = (msg: string | unknown, ...args: unknown[]) => {
       if (this.debugEnabled) {
         if (typeof msg === 'string') {
@@ -120,20 +116,55 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
+  /**
+   * Required by your accessory classes:
+   * Find an accessory by UUID or create+register it, and ensure the primary service exists.
+   */
+  public getOrCreateAccessory<T extends Service>(
+    uuid: string,
+    serviceCtor: new (...args: unknown[]) => T,
+    displayName: string,
+    subtype?: string,
+  ): PlatformAccessory {
+    let accessory = this.accessories.find((a) => a.UUID === uuid);
+    if (!accessory) {
+      accessory = new this.api.platformAccessory(displayName, uuid);
+      (accessory.context as AccessoryContext).robotId = undefined; // caller can set later
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.push(accessory);
+      this.d(`Registered new accessory: ${displayName} (${uuid})`);
+    }
+
+    // Ensure the requested service exists (by name/subtype)
+    let svc = accessory.getService(displayName);
+    if (!svc) {
+      svc = accessory.addService(
+        // @ts-expect-error: HomeKit service constructors vary in args
+        serviceCtor,
+        displayName,
+        subtype,
+      );
+    }
+    return accessory;
+  }
+
   private async discoverDevices(): Promise<void> {
-    if (!this.whisker) {
-      this.d('No Whisker client configured; discovery delegated to controllers.');
+    // Only run if we have a whisker client and it exposes a list method
+    const listFn = (this.whisker as unknown as { listRobots?: () => Promise<Robot[]> })?.listRobots;
+    if (!this.whisker || typeof listFn !== 'function') {
+      this.d('Discovery skipped (no whisker client or listRobots not available).');
       return;
     }
 
     try {
-      const robots: Robot[] = await this.whisker.listRobots();
+      const robots: Robot[] = await listFn.call(this.whisker);
       this.d(`Found ${robots.length} robot(s)`);
 
       for (const robot of robots) {
         await this.registerOrUpdateRobot(robot);
       }
 
+      // Optional cleanup of stale cached accessories
       const liveIds = new Set<string>();
       for (const r of robots) {
         const id = getRobotId(r);
@@ -154,6 +185,10 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     }
   }
 
+  /**
+   * Register or update one robot, and construct the HA-style controller with the expected args:
+   *   new LitterRobot(account, device, platform, log, config)
+   */
   public async registerOrUpdateRobot(robot: Robot): Promise<void> {
     const robotId = getRobotId(robot);
     const name = getRobotName(robot, robotId);
@@ -163,32 +198,17 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const uuid = this.api.hap.uuid.generate(robotId);
-    let accessory = this.accessories.find((a) => a.UUID === uuid);
-
-    if (accessory) {
-      this.d(`Updating existing accessory: ${name} (${robotId})`);
-      accessory.displayName = name;
-      (accessory.context as AccessoryContext).robotId = robotId;
-      this.api.updatePlatformAccessories([accessory]);
-    } else {
-      this.d(`Registering new accessory: ${name} (${robotId})`);
-      accessory = new this.api.platformAccessory(name, uuid);
-      (accessory.context as AccessoryContext).robotId = robotId;
-
-      const controller = new LitterRobot(this, accessory, robot);
-      this.litterRobots.set(robotId, controller);
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      this.accessories.push(accessory);
+    // Construct the controller (it will create per-feature accessories using getOrCreateAccessory)
+    if (!this.whisker) {
+      this.log.warn('Whisker client not configured; cannot register robot controller.');
       return;
     }
 
-    const existing = this.litterRobots.get(robotId);
-    if (!existing) {
-      const controller = new LitterRobot(this, accessory, robot);
-      this.litterRobots.set(robotId, controller);
-    } else if (typeof (existing as unknown as { updateFromRobot?: (r: Robot) => void }).updateFromRobot === 'function') {
-      (existing as unknown as { updateFromRobot: (r: Robot) => void }).updateFromRobot(robot);
-    }
+    this.d(`Creating controller for ${name} (${robotId})`);
+    // Your repo’s constructor: (account, device, platform, log, config)
+    // eslint-disable-next-line no-new
+    new LitterRobot(this.whisker, robot, this, this.log, this.config);
+
+    // Note: Accessory creation/updates are handled inside sub-accessory classes via getOrCreateAccessory()
   }
 }
