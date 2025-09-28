@@ -85,11 +85,12 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  /** Safe JSON stringify with cap to keep HB logs responsive */
+
   private s(value: unknown, cap = 12000): string {
     let out: string;
     try {
-      out = JSON.stringify(value);
+      const tmp = JSON.stringify(value);
+      out = typeof tmp === 'string' ? tmp : String(value);
     } catch {
       out = String(value);
     }
