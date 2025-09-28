@@ -64,7 +64,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   public readonly debugEnabled: boolean;
   public readonly d: (msg: string | unknown, ...args: unknown[]) => void;
 
-  private readonly whisker?: Whisker;
+  public readonly whisker?: Whisker;
 
   constructor(
     public readonly log: Logger,
@@ -116,40 +116,28 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
-  /**
-   * Required by your accessory classes:
-   * Find an accessory by UUID or create+register it, and ensure the primary service exists.
-   */
-  public getOrCreateAccessory<T extends Service>(
+  public getOrCreateAccessory(
     uuid: string,
-    serviceCtor: new (...args: unknown[]) => T,
-    displayName: string,
-    subtype?: string,
+    arg2: unknown,
+    arg3?: unknown,
+    _arg4?: unknown,
   ): PlatformAccessory {
     let accessory = this.accessories.find((a) => a.UUID === uuid);
     if (!accessory) {
+      const displayName =
+        typeof arg2 === 'string'
+          ? arg2
+          : (typeof arg3 === 'string' ? arg3 : `LR4 ${uuid.slice(0, 6)}`);
       accessory = new this.api.platformAccessory(displayName, uuid);
-      (accessory.context as AccessoryContext).robotId = undefined; // caller can set later
+      (accessory.context as AccessoryContext).robotId = undefined;
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.push(accessory);
-      this.d(`Registered new accessory: ${displayName} (${uuid})`);
-    }
-
-    // Ensure the requested service exists (by name/subtype)
-    let svc = accessory.getService(displayName);
-    if (!svc) {
-      svc = accessory.addService(
-        // @ts-expect-error: HomeKit service constructors vary in args
-        serviceCtor,
-        displayName,
-        subtype,
-      );
+      this.d(`Registered accessory ${displayName} (${uuid})`);
     }
     return accessory;
   }
 
   private async discoverDevices(): Promise<void> {
-    // Only run if we have a whisker client and it exposes a list method
     const listFn = (this.whisker as unknown as { listRobots?: () => Promise<Robot[]> })?.listRobots;
     if (!this.whisker || typeof listFn !== 'function') {
       this.d('Discovery skipped (no whisker client or listRobots not available).');
@@ -164,7 +152,6 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
         await this.registerOrUpdateRobot(robot);
       }
 
-      // Optional cleanup of stale cached accessories
       const liveIds = new Set<string>();
       for (const r of robots) {
         const id = getRobotId(r);
@@ -172,8 +159,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       }
 
       for (const acc of this.accessories) {
-        const ctx = (acc.context ?? {}) as AccessoryContext;
-        const accId = ctx.robotId;
+        const accId = (acc.context as AccessoryContext | undefined)?.robotId;
         if (accId && !liveIds.has(accId)) {
           this.log.info(`Removing stale accessory ${acc.displayName}`);
           this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [acc]);
@@ -185,30 +171,26 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  /**
-   * Register or update one robot, and construct the HA-style controller with the expected args:
-   *   new LitterRobot(account, device, platform, log, config)
-   */
   public async registerOrUpdateRobot(robot: Robot): Promise<void> {
     const robotId = getRobotId(robot);
     const name = getRobotName(robot, robotId);
-
     if (!robotId) {
       this.log.warn(`Skipping robot without ID (name: ${name})`);
       return;
     }
 
-    // Construct the controller (it will create per-feature accessories using getOrCreateAccessory)
     if (!this.whisker) {
       this.log.warn('Whisker client not configured; cannot register robot controller.');
       return;
     }
 
     this.d(`Creating controller for ${name} (${robotId})`);
-    // Your repo’s constructor: (account, device, platform, log, config)
-    // eslint-disable-next-line no-new
-    new LitterRobot(this.whisker, robot, this, this.log, this.config);
-
-    // Note: Accessory creation/updates are handled inside sub-accessory classes via getOrCreateAccessory()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Ctor: any = LitterRobot as unknown as any;
+    try {
+      new Ctor(this.whisker, robot, this, this.log, this.config);
+    } catch {
+      new Ctor(this.whisker, robot, this);
+    }
   }
 }
