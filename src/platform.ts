@@ -22,37 +22,25 @@ interface PluginConfig extends PlatformConfig {
   baseUrl?: string;
 }
 
-type UUID = string;
-
-type AccessoryContext = {
-  robotId?: string;
-};
+type AccessoryContext = { robotId?: string };
 
 function safeInspect(value: unknown, depth = 6): string {
-  try {
-    return util.inspect(value, { depth, colors: false });
-  } catch {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
+  try { return util.inspect(value, { depth, colors: false }); }
+  catch { try { return JSON.stringify(value); } catch { return String(value); } }
 }
 
 function getRobotId(robot: Robot): string | undefined {
   const r = robot as unknown as Record<string, unknown>;
-  const keys = ['id', 'serial', 'device_id', 'robotId'];
-  for (const k of keys) {
+  for (const k of ['id', 'serial', 'device_id', 'robotId']) {
     const v = r[k];
-    if (typeof v === 'string' && v.trim().length > 0) return v;
+    if (typeof v === 'string' && v.trim()) return v;
   }
   return undefined;
 }
 
 function getRobotName(robot: Robot, fallbackId?: string): string {
   const r = robot as unknown as Record<string, unknown>;
-  if (typeof r.name === 'string' && r.name.trim().length > 0) return r.name;
+  if (typeof r.name === 'string' && r.name.trim()) return r.name;
   return `Litter-Robot${fallbackId ? ` ${fallbackId}` : ''}`;
 }
 
@@ -77,17 +65,11 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     this.debugEnabled = Boolean(this.config?.debug);
     this.d = (msg: string | unknown, ...args: unknown[]) => {
       if (this.debugEnabled) {
-        if (typeof msg === 'string') {
-          this.log.info(`[DEBUG] ${msg}`, ...args);
-        } else {
-          this.log.info(`[DEBUG] ${safeInspect(msg)}`);
-        }
+        if (typeof msg === 'string') this.log.info(`[DEBUG] ${msg}`, ...args);
+        else this.log.info(`[DEBUG] ${safeInspect(msg)}`);
       } else {
-        if (typeof msg === 'string') {
-          this.log.debug(msg, ...args);
-        } else {
-          this.log.debug(safeInspect(msg, 4));
-        }
+        if (typeof msg === 'string') this.log.debug(msg, ...args);
+        else this.log.debug(safeInspect(msg, 4));
       }
     };
 
@@ -100,8 +82,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
         whiskerClient = new Whisker({ username, password, token, baseUrl });
       }
     } catch (e) {
-      const err = e as Error;
-      this.log.warn(`Whisker client init skipped or failed: ${err.message}`);
+      this.log.warn(`Whisker client init skipped or failed: ${(e as Error).message}`);
     }
     this.whisker = whiskerClient;
 
@@ -116,29 +97,23 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
+  // Accepts (uuid, displayName) or (uuid, _serviceCtor, displayName, _subtype)
   public getOrCreateAccessory(
     uuid: string,
     arg2: unknown,
     arg3?: unknown,
     _arg4?: unknown,
   ): PlatformAccessory {
-    let accessory = this.accessories.find((a) => a.UUID === uuid);
+    let accessory = this.accessories.find(a => a.UUID === uuid);
     if (!accessory) {
       const displayName =
         typeof arg2 === 'string'
           ? arg2
           : (typeof arg3 === 'string' ? arg3 : `LR4 ${uuid.slice(0, 6)}`);
-
-      // Use 4-arg ctor to satisfy typings that expect 3–4 params
-      accessory = new this.api.platformAccessory(
-        displayName,
-        uuid,
-        this.api.hap.Categories.OTHER,
-        undefined as unknown as Record<string, unknown>,
-      );
-
+      // Correct Homebridge ctor: (displayName, uuid[, category])
+      accessory = new this.api.platformAccessory(displayName, uuid);
       (accessory.context as AccessoryContext).robotId = undefined;
-      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]); // 3 args
       this.accessories.push(accessory);
       this.d(`Registered accessory ${displayName} (${uuid})`);
     }
@@ -153,9 +128,8 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     }
 
     try {
-      const robots: Robot[] = await listFn.call(this.whisker);
+      const robots = await listFn.call(this.whisker);
       this.d(`Found ${robots.length} robot(s)`);
-
       for (const robot of robots) {
         await this.registerOrUpdateRobot(robot);
       }
@@ -174,8 +148,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
         }
       }
     } catch (e) {
-      const err = e as Error;
-      this.log.error(`Error during Whisker discovery: ${err.message}`);
+      this.log.error(`Error during Whisker discovery: ${(e as Error).message}`);
     }
   }
 
@@ -186,15 +159,15 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       this.log.warn(`Skipping robot without ID (name: ${name})`);
       return;
     }
-
     if (!this.whisker) {
       this.log.warn('Whisker client not configured; cannot register robot controller.');
       return;
     }
 
     this.d(`Creating controller for ${name} (${robotId})`);
+    // Support varying ctor arities across commits.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const Ctor: any = LitterRobot as unknown as any;
+    const Ctor: any = LitterRobot;
     try {
       new Ctor(this.whisker, robot, this, this.log, this.config);
     } catch {
