@@ -15,6 +15,8 @@ import { Robot } from './api/Whisker.types';
 type PluginConfig = PlatformConfig & {
   disableDrawerSensor?: boolean;
   debug?: boolean;
+  /** When true, dump raw API responses & full device payloads (capped). */
+  debugRaw?: boolean;
 };
 
 // Accept either snake_case / camelCase and (optionally) a nested status.code
@@ -35,6 +37,14 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
 
   private get cfg(): PluginConfig {
     return this.config as PluginConfig;
+  }
+
+  private get debugEnabled(): boolean {
+    return Boolean(this.cfg.debug);
+  }
+
+  private get rawEnabled(): boolean {
+    return Boolean(this.cfg.debugRaw);
   }
 
   constructor(
@@ -61,16 +71,32 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     });
   }
 
-  private get debugEnabled(): boolean {
-    return Boolean(this.cfg.debug);
-  }
-
   /** Unified debug (surfaces clearly in HB logs when enabled) */
   public d(message: string, ...params: unknown[]): void {
     if (this.debugEnabled) {
-      // Prefer info so debug lines aren’t hidden in default HB UI filters.
       this.log.info(`[DEBUG] ${message}`, ...params);
     }
+  }
+
+  /** Very loud logging; only emits when debugRaw=true */
+  public r(message: string, ...params: unknown[]): void {
+    if (this.rawEnabled) {
+      this.log.info(`[RAW] ${message}`, ...params);
+    }
+  }
+
+  /** Safe JSON stringify with cap to keep HB logs responsive */
+  private s(value: unknown, cap = 12000): string {
+    let out: string;
+    try {
+      out = JSON.stringify(value);
+    } catch {
+      out = String(value);
+    }
+    if (out.length > cap) {
+      return out.slice(0, cap) + `… [+${out.length - cap} bytes truncated]`;
+    }
+    return out;
   }
 
   public getOrCreateAccessory(uuid: string, name: string): PlatformAccessory {
@@ -113,9 +139,12 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     });
 
     const response = await account.sendCommand(body);
+    if (this.rawEnabled) {
+      this.r('discover response: %s', this.s(response));
+    }
     const devices = (response?.data?.data?.query ?? []) as Robot[];
     if (this.debugEnabled) {
-      this.log.info('[DEBUG] discovered devices -> %s', JSON.stringify(devices.map((d) => d.serial)));
+      this.d('discovered devices -> %s', this.s(devices.map((d) => d.serial)));
     }
     for (const device of devices) {
       this.log.debug('Discovered device:', device.name, device.serial);
@@ -124,7 +153,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
   }
 
   public pollForUpdates(account: Whisker, interval: number): void {
-    // Wide query (tries nested compact status code if supported)
+    // Wide query (attempt nested compact status code if supported)
     const wide = JSON.stringify({
       query: `{
         query: getLitterRobot4ByUser(userId: "${account.accountId}") {
@@ -154,33 +183,49 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     });
 
     // Shared response handler
-    const handle = (response: unknown): void => {
-      const data = (response as { data?: { data?: { query?: RobotMaybe[] } } })?.data?.data?.query ?? [];
-      this.d('poll -> %d device(s)', data.length);
+    const handle = (response: unknown, tag: 'wide' | 'narrow'): void => {
+      if (this.rawEnabled) {
+        const rAny = response as { data?: { errors?: unknown; data?: unknown } };
+        this.r('%s response errors: %s', tag, this.s(rAny?.data?.errors));
+        this.r('%s response data: %s', tag, this.s(rAny?.data?.data));
+      }
 
-      for (const device of data) {
+      const list =
+        (response as { data?: { data?: { query?: RobotMaybe[] } } })?.data?.data?.query ?? [];
+      const arr = Array.isArray(list) ? list : [];
+      this.d('poll -> %d device(s)', arr.length);
+
+      for (const device of arr) {
+        // Show every key we got for this device, and the full payload.
+        const keys = Object.keys(device as Record<string, unknown>).join(',');
+        this.r('[device keys] %s -> %s', device?.name ?? '<unnamed>', keys);
+
         const sc =
-          device.status?.code ??
-          device.status_code ??
-          device.statusCode ??
+          device?.status?.code ??
+          device?.status_code ??
+          device?.statusCode ??
           null;
 
+        // Compact payload in normal debug:
         this.d(
           '[poll] %s payload=%s',
-          device.name,
-          JSON.stringify({
-            serial: device.serial,
-            status: device.robotStatus,
+          device?.name,
+          this.s({
+            serial: device?.serial,
+            status: device?.robotStatus,
             status_code: sc,
-            catDetect: device.catDetect,
-            dfi: device.DFILevelPercent,
-            night: device.isNightLightLEDOn,
+            catDetect: device?.catDetect,
+            dfi: device?.DFILevelPercent,
+            night: device?.isNightLightLEDOn,
           }),
         );
+
+        // Full device object when debugRaw is on:
+        this.r('[device raw] %s -> %s', device?.name ?? '<unnamed>', this.s(device));
       }
 
       // Propagate updates to device objects.
-      for (const device of data) {
+      for (const device of arr) {
         const lr = this.litterRobots.find((b) => b.serialNumber === device.serial);
         if (lr) {
           lr.update(device as Robot);
@@ -191,24 +236,43 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       setTimeout(() => this.pollForUpdates(account, interval), interval);
     };
 
-    // Try wide → fallback to narrow automatically
+    // Try wide → fallback to narrow if errors OR empty list
     void account
       .sendCommand(wide)
       .then((resp: unknown) => {
         const r = resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } } | undefined;
-        const hasErrors = Array.isArray(r?.data?.errors) && (r?.data?.errors?.length ?? 0) > 0;
-        const hasData = Boolean(r?.data?.data?.query);
+        const errs = r?.data?.errors ?? [];
+        const q = r?.data?.data?.query as unknown;
 
-        if (hasErrors || !hasData) {
-          this.d(
-            'wide query failed/empty; falling back%s',
-            hasErrors ? ` (errors: ${JSON.stringify(r?.data?.errors)})` : '',
-          );
-          return account.sendCommand(narrow);
+        const hasErrors = Array.isArray(errs) && errs.length > 0;
+        const isArray = Array.isArray(q);
+        const isEmptyArray = isArray && q.length === 0;
+        const hasNonEmptyData = isArray && q.length > 0;
+
+        if (hasErrors) {
+          this.r('wide query errors: %s', this.s(errs));
         }
-        return resp;
+
+        if (hasErrors || !hasNonEmptyData) {
+          this.d('wide query failed/empty (errors=%s, empty=%s) → fallback',
+            String(hasErrors), String(isEmptyArray));
+          return account.sendCommand(narrow).then((resp2) => ({ resp, resp2 }));
+        }
+
+        return { resp, resp2: null as unknown };
       })
-      .then(handle)
+      .then((bundle: { resp: unknown; resp2: unknown } | undefined) => {
+        if (!bundle) {
+          // Should not happen; defensive.
+          return;
+        }
+        const { resp, resp2 } = bundle;
+        if (resp2) {
+          handle(resp2, 'narrow');
+        } else {
+          handle(resp, 'wide');
+        }
+      })
       .catch((err: unknown) => {
         const msg = (err as Error)?.message ?? String(err);
         this.log.warn('Poll failed: %s', msg);
