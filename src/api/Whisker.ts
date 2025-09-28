@@ -68,8 +68,11 @@ export default class Whisker {
   }
 
   private async verifyToken(token: string): Promise<string> {
-    const parsed: { claims: { mid: string } } = parseJwt(token);
-    this.accountId = parsed.claims.mid;
+    const parsed = parseJwt(token) as { claims?: { mid?: string } };
+    this.accountId = parsed?.claims?.mid ?? '';
+    if (!this.accountId) {
+      this.log.warn('Whisker: could not read accountId (mid) from JWT claims');
+  }
     this.log.debug('UserId set -> ', this.accountId);
     this.log.debug('Verifying Token');
     const data = JSON.stringify({
