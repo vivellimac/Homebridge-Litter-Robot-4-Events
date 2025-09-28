@@ -121,7 +121,7 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     return accessory;
   }
 
-  configureAccessory(accessory: PlatformAccessory): void {
+  public configureAccessory(accessory: PlatformAccessory): void {
     this.log.info('Loading accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
   }
@@ -241,7 +241,8 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
     void account
       .sendCommand(wide)
       .then((resp: unknown) => {
-        const r = resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } } | undefined;
+        const r =
+          (resp as { data?: { errors?: unknown[]; data?: { query?: unknown } } }) ?? undefined;
         const errs = r?.data?.errors ?? [];
         const q = r?.data?.data?.query as unknown;
 
@@ -255,8 +256,11 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
         }
 
         if (hasErrors || !hasNonEmptyData) {
-          this.d('wide query failed/empty (errors=%s, empty=%s) → fallback',
-            String(hasErrors), String(isEmptyArray));
+          this.d(
+            'wide query failed/empty (errors=%s, empty=%s) → fallback',
+            String(hasErrors),
+            String(isEmptyArray),
+          );
           return account.sendCommand(narrow).then((resp2) => ({ resp, resp2 }));
         }
 
@@ -264,7 +268,6 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
       })
       .then((bundle: { resp: unknown; resp2: unknown } | undefined) => {
         if (!bundle) {
-          // Should not happen; defensive.
           return;
         }
         const { resp, resp2 } = bundle;
