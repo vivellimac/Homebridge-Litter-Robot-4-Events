@@ -1,7 +1,7 @@
 {
   "name": "homebridge-litter-robot-4-events",
   "version": "0.1.1",
-  "description": "Litter Robot 4 Plugin for Apple HomeKit via Homebridge with cycle event switches",
+  "description": "Litter Robot 4 plugin for Apple HomeKit via Homebridge with cycle event switches",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -31,12 +31,17 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc",
-    "lint": "eslint .",
-    "test": "node -e \"console.log(JSON.stringify({ok:true}))\""
+    "lint": "eslint . --ext .ts --max-warnings=0",
+    "test": "node -e \"console.log(JSON.stringify({ ok: true }))\""
   },
   "private": false,
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^9.11.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.2",
+    "@types/node": "^20.14.11"
   }
 }
