@@ -21,7 +21,7 @@
   "scripts": {
     "lint": "eslint src/**.ts --max-warnings=0",
     "build": "rimraf ./dist && tsc -p .",
-    "watch": "tsc -p . -w"
+    "watch": "tsc -p . -w",
     "prepublishOnly": "npm run lint && npm run build"
   },
   "keywords": [
