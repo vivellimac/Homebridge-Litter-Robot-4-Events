@@ -14,6 +14,8 @@ type PluginConfig = PlatformConfig & {
   ccpMaxMinutes?: number;
 };
 
+type RobotMaybe = Robot & Partial<{ status_code: string; statusCode: string }>;
+
 const CODE_LABELS: Record<string, string> = {
   br: 'Bonnet Removed',
   ccc: 'Clean Cycle Complete',
@@ -113,15 +115,25 @@ export class LitterRobot {
       this.drawerLevel.update(Number.isFinite(dfiPercentNum) ? dfiPercentNum : 0);
     }
 
-    this.handleRobotUpdate(device);
+    this.handleRobotUpdate(device as RobotMaybe);
   }
 
-  private handleRobotUpdate(device: Robot): void {
+  /** Prefer HA-style status_code if present; fall back to robotStatus. */
+  private getBestStatusCode(device: RobotMaybe): string {
+    const rawCode = device.status_code ?? device.statusCode;
+    if (rawCode && typeof rawCode === 'string' && rawCode.trim()) {
+      this.platform.d('status_code present %s → %s', this.name, rawCode);
+      return rawCode.trim().toLowerCase();
+    }
     const raw = (device.robotStatus ?? '').toString();
-    this.platform.d('device payload: %s', JSON.stringify(device));
-    const code = this.normalizeStatusCode(raw);
-
     this.platform.d('robotStatus raw %s %s', this.name, raw);
+    return this.normalizeStatusCode(raw);
+  }
+
+  private handleRobotUpdate(device: RobotMaybe): void {
+    this.platform.d('device payload: %s', JSON.stringify(device));
+
+    const code = this.getBestStatusCode(device);
     this.platform.d('mapped status %s → %s', this.name, code || '∅');
     if (!code) {
       return;
@@ -129,6 +141,7 @@ export class LitterRobot {
 
     const prev = this.cycleEvents.lastStatusCode;
 
+    // detect cleaning window / fallback timeout
     if (STATUS_IN_PROGRESS.has(code)) {
       if (!this.cleanActive) {
         this.cleanActive = true;
@@ -143,6 +156,7 @@ export class LitterRobot {
       }
     }
 
+    // completion paths
     if (STATUS_COMPLETE.has(code)) {
       this.fireCompletedAndClear();
     } else if (STATUS_READY.has(code) && (prev === 'ccp' || this.cleanActive)) {
@@ -150,6 +164,7 @@ export class LitterRobot {
       this.fireCompletedAndClear();
     }
 
+    // interrupt / fault codes
     if (INTERRUPT_LIKE.has(code)) {
       this.fireInterrupted();
     }
@@ -160,6 +175,7 @@ export class LitterRobot {
     }
   }
 
+  /** Map mixed strings (e.g., "ROBOT_CLEAN", "Clean cycle complete") to HA short codes. */
   private normalizeStatusCode(s: string): string {
     let v = (s ?? '').toString().trim();
     if (!v) {
@@ -167,16 +183,15 @@ export class LitterRobot {
     }
 
     const exact = v.toLowerCase();
-    if (exact === 'robot_clean') {
-      return 'ccp'; // Clean in progress
-    }
-    if (exact === 'robot_idle') {
-      return 'rdy'; // Ready/idle
-    }
-    if (CODE_LABELS[exact]) {
-      return exact;
-    }
 
+    // Known LR4 app strings
+    if (exact === 'robot_clean') return 'ccp';
+    if (exact === 'robot_idle') return 'rdy';
+
+    // Already an HA code?
+    if (CODE_LABELS[exact]) return exact;
+
+    // Sometimes status is prefixed by the device name — strip it if present.
     if (this.name && v.toLowerCase().startsWith(this.name.toLowerCase())) {
       v = v.slice(this.name.length).trim();
     }
@@ -206,15 +221,9 @@ export class LitterRobot {
       }
     }
 
-    if (t.includes('fault')) {
-      return 'csf';
-    }
-    if (t.includes('pause')) {
-      return 'p';
-    }
-    if (t.includes('off')) {
-      return 'off';
-    }
+    if (t.includes('fault')) return 'csf';
+    if (t.includes('pause')) return 'p';
+    if (t.includes('off')) return 'off';
 
     return '';
   }
@@ -238,6 +247,7 @@ export class LitterRobot {
   private fireCompletedAndClear(): void {
     this.cycleEvents.pressCompleted();
     this.cycleEvents.clearInterrupted();
+
     if (this.interruptedTimer) {
       clearTimeout(this.interruptedTimer);
       this.interruptedTimer = null;
