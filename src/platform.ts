@@ -128,7 +128,15 @@ export class LitterRobotPlatform implements DynamicPlatformPlugin {
         typeof arg2 === 'string'
           ? arg2
           : (typeof arg3 === 'string' ? arg3 : `LR4 ${uuid.slice(0, 6)}`);
-      accessory = new this.api.platformAccessory(displayName, uuid);
+
+      // Use 4-arg ctor to satisfy typings that expect 3–4 params
+      accessory = new this.api.platformAccessory(
+        displayName,
+        uuid,
+        this.api.hap.Categories.OTHER,
+        undefined as unknown as Record<string, unknown>,
+      );
+
       (accessory.context as AccessoryContext).robotId = undefined;
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       this.accessories.push(accessory);
