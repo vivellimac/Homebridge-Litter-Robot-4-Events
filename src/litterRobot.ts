@@ -1,11 +1,13 @@
+import { Logger, PlatformConfig } from 'homebridge';
+
 import { LitterRobotPlatform } from './platform';
 import Whisker from './api/Whisker';
-import { Logger, PlatformConfig } from 'homebridge';
+import { Robot } from './api/Whisker.types';
+
 import { GlobeLightAccessory } from './accessories/globeLight';
 import { OccupancySensorAccessory } from './accessories/occupancySensor';
 import { DrawerLevelAccessory } from './accessories/drawerLevel';
 import { CycleEventsAccessory } from './accessories/cycleEvents';
-import { Robot } from './api/Whisker.types';
 
 type PluginConfig = PlatformConfig & {
   disableDrawerSensor?: boolean;
@@ -64,38 +66,95 @@ const STATUS_COMPLETE = new Set<string>(['ccc']);
 const STATUS_IN_PROGRESS = new Set<string>(['ccp']);
 const STATUS_READY = new Set<string>(['rdy']);
 
+/** Compact boolean snapshot for logs from a canonical code. */
+function debugSnapshotFromCode(code: string) {
+  const c = (code || '').toLowerCase();
+  const has = (...xs: string[]) => xs.some((x) => c === x || c.includes(x));
+  return {
+    cycle: has('ccc') ? 'complete' : has('ccp') ? 'in_progress' : 'none',
+    idleReady: has('rdy'),
+    pinch: has('pd'),
+    bonnet: has('br', 'scf', 'sdf', 'spf'),
+    homeDump: has('hpf', 'dpf', 'dhf'),
+    pausedInterrupt: has('p', 'csi', 'csf', 'otf', 'cst'),
+    offline: has('offline', 'pwru', 'pwrd', 'off'),
+  };
+}
+
 export class LitterRobot {
-  private globeLight: GlobeLightAccessory;
-  private occupancySensor: OccupancySensorAccessory;
-  private drawerLevel?: DrawerLevelAccessory;
-  private cycleEvents: CycleEventsAccessory;
+  private readonly platform: LitterRobotPlatform;
+  private readonly account: Whisker;
+  private readonly log: Logger;
+  private readonly config: PlatformConfig;
+
+  private readonly globeLight: GlobeLightAccessory;
+  private readonly occupancySensor: OccupancySensorAccessory;
+  private readonly drawerLevel?: DrawerLevelAccessory;
+  private readonly cycleEvents: CycleEventsAccessory;
 
   private interruptedTimer: NodeJS.Timeout | null = null;
   private cleanActive = false;
   private cleanStartedAt: number | null = null;
 
-  public uuid = {
-    bot: this.platform.api.hap.uuid.generate(this.device.serial),
-    globeLight: this.platform.api.hap.uuid.generate(this.device.serial + 'globeLight'),
-    occupancySensor: this.platform.api.hap.uuid.generate(this.device.serial + 'occupancySensor'),
-    drawerLevel: this.platform.api.hap.uuid.generate(this.device.serial + 'drawerLevel'),
+  public readonly uuid = {
+    bot: '',
+    globeLight: '',
+    occupancySensor: '',
+    drawerLevel: '',
   };
 
-  public serialNumber = this.device.serial;
-  public name = this.device.name;
+  public readonly serialNumber: string;
+  public readonly name: string;
 
   private get cfg(): PluginConfig {
     return this.config as PluginConfig;
   }
 
   constructor(
-    private readonly account: Whisker,
-    public readonly device: Robot,
-    private readonly platform: LitterRobotPlatform,
-    private readonly log: Logger,
-    private readonly config: PlatformConfig,
+    platform: LitterRobotPlatform,
+    accessoryOrDeviceAccount: Whisker | PlatformConfig | unknown,
+    maybeDevice?: Robot,
+    maybePlatform?: LitterRobotPlatform,
+  );
+  constructor(
+    platform: LitterRobotPlatform,
+    accessory: unknown, // kept for potential future signature compatibility
+    device: Robot,
+  );
+  constructor(
+    platformOrAccount: LitterRobotPlatform,
+    accountOrAccessory: Whisker | unknown,
+    device: Robot,
+    platform?: LitterRobotPlatform,
+    log?: Logger,
+    config?: PlatformConfig,
   ) {
+    // Normalize to your original ctor shape:
+    // (account: Whisker, device: Robot, platform: LitterRobotPlatform, log: Logger, config: PlatformConfig)
+    const _platform = (platform ?? platformOrAccount) as LitterRobotPlatform;
+    const _account = accountOrAccessory as Whisker;
+
+    this.platform = _platform;
+    this.account = _account;
+
+    // From the original file
+    this.log = (log as Logger) ?? (this.platform.log as Logger);
+    this.config = (config as PlatformConfig) ?? (this.platform.config as PlatformConfig);
+
+    this.serialNumber = device.serial;
+    this.name = device.name;
+
+    // UUIDs depend on HAP instance
+    this.uuid = {
+      bot: this.platform.api.hap.uuid.generate(device.serial),
+      globeLight: this.platform.api.hap.uuid.generate(`${device.serial}globeLight`),
+      occupancySensor: this.platform.api.hap.uuid.generate(`${device.serial}occupancySensor`),
+      drawerLevel: this.platform.api.hap.uuid.generate(`${device.serial}drawerLevel`),
+    };
+
     this.log.info('Litter Robot:', device.name, device.serial);
+
+    // Accessory controllers as in your live branch
     this.globeLight = new GlobeLightAccessory(this.platform, this.account, this);
     this.occupancySensor = new OccupancySensorAccessory(this.platform, this.account, this);
     if (!this.cfg.disableDrawerSensor) {
@@ -121,10 +180,9 @@ export class LitterRobot {
   /** Extract the raw status code if present (snake/camel), else try a nested shape. */
   private getRawStatusCode(device: RobotMaybe): string | null {
     const s1 = device.status_code ?? device.statusCode;
-    if (s1 && typeof s1 === 'string' && s1.trim()) {
+    if (typeof s1 === 'string' && s1.trim()) {
       return s1.trim();
     }
-    // Allow a nested fallback (e.g., device.status.code) if upstream changes
     const nested = (device as unknown as { status?: { code?: string } })?.status?.code;
     return typeof nested === 'string' && nested.trim() ? nested.trim() : null;
   }
@@ -159,14 +217,30 @@ export class LitterRobot {
     );
 
     const code = this.getBestStatusCode(device);
-    this.platform.d('[poll] %s mapped → %s', this.name, code || '∅');
+    const label = CODE_LABELS[code] ?? code;
+    this.platform.d('[poll] %s mapped → %s (%s)', this.name, code || '∅', label || '∅');
     if (!code) {
       return;
     }
 
+    // 🔎 Per-poll snapshot (cycle/idle/pinch/bonnet/homeDump/paused/offline)
+    const snap = debugSnapshotFromCode(code);
+    this.platform.d(
+      '[status] %s code=%s cycle=%s idleReady=%s pinch=%s bonnet=%s homeDump=%s pausedInterrupt=%s offline=%s',
+      this.name,
+      code,
+      snap.cycle,
+      String(snap.idleReady),
+      String(snap.pinch),
+      String(snap.bonnet),
+      String(snap.homeDump),
+      String(snap.pausedInterrupt),
+      String(snap.offline),
+    );
+
     const prev = this.cycleEvents.lastStatusCode;
 
-    // detect cleaning window / fallback timeout
+    // Detect cleaning window / fallback timeout
     if (STATUS_IN_PROGRESS.has(code)) {
       if (!this.cleanActive) {
         this.cleanActive = true;
@@ -181,7 +255,7 @@ export class LitterRobot {
       }
     }
 
-    // completion paths
+    // Completion paths
     if (STATUS_COMPLETE.has(code)) {
       this.fireCompletedAndClear();
     } else if (STATUS_READY.has(code) && (prev === 'ccp' || this.cleanActive)) {
@@ -189,7 +263,7 @@ export class LitterRobot {
       this.fireCompletedAndClear();
     }
 
-    // interrupt / fault codes
+    // Interrupt / fault codes
     if (INTERRUPT_LIKE.has(code)) {
       this.fireInterrupted();
     }
@@ -203,9 +277,7 @@ export class LitterRobot {
   /** Map mixed strings (e.g., "ROBOT_CLEAN", "Clean cycle complete") to HA short codes. */
   private normalizeStatusCode(s: string): string {
     let v = (s ?? '').toString().trim();
-    if (!v) {
-      return '';
-    }
+    if (!v) return '';
 
     const exact = v.toLowerCase();
 
@@ -241,9 +313,7 @@ export class LitterRobot {
     ];
 
     for (const [pat, mapped] of KEYWORD_MAP) {
-      if (pat.test(t)) {
-        return mapped;
-      }
+      if (pat.test(t)) return mapped;
     }
 
     if (t.includes('fault')) return 'csf';
